@@ -13,11 +13,8 @@ let pool: mysql.Pool | null = null;
 
 function getDb(): mysql.Pool {
   if (!pool) {
-    if (!process.env.MYSQL_HOST) {
-      console.warn("WARNING: MYSQL_HOST is missing in environment variables. Database operations will fail.");
-    }
     pool = mysql.createPool({
-      host: process.env.MYSQL_HOST,
+      host: '118.139.180.163',
       user: process.env.MYSQL_USER,
       password: process.env.MYSQL_PASSWORD,
       database: process.env.MYSQL_DATABASE,
@@ -89,6 +86,10 @@ async function startServer() {
       const { email, password, full_name, display_name } = req.body;
       const hashedPassword = await bcrypt.hash(password, 10);
       const db = getDb();
+      if (!db) {
+         return res.status(500).json({ error: 'Database could not be initialized.'});
+      }
+      
       const id = crypto.randomUUID();
       await db.query(
         'INSERT INTO users (id, email, password, full_name, display_name) VALUES (?, ?, ?, ?, ?)',
@@ -108,6 +109,9 @@ async function startServer() {
     try {
       const { email, password } = req.body;
       const db = getDb();
+      if (!db) {
+         return res.status(500).json({ error: 'Database could not be initialized.'});
+      }
       const [rows]: any = await db.query('SELECT * FROM users WHERE email = ?', [email]);
       if (rows.length === 0) return res.status(400).json({ error: 'Invalid email or password' });
       
