@@ -125,6 +125,94 @@ async function startServer() {
       res.status(500).json({ error: e.message });
     }
   });
+
+  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '396522502341-jsusuml98fi8j4uf27i89ta73k05ofv6.apps.googleusercontent.com';
+  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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';
+
+  app.get('/api/auth/google/url', (req, res) => {
+    const redirectUri = req.query.redirectUri as string;
+    if (!GOOGLE_CLIENT_ID) {
+      return res.status(500).json({ error: "Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
+    }
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      access_type: 'offline',
+      prompt: 'consent',
+      state: redirectUri // pass redirect_uri through state so the callback knows it
+    });
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+    res.json({ url: authUrl });
+  });
+
+  app.get('/api/auth/google/callback', async (req, res) => {
+    const { code, state } = req.query; // we can pass redirectUri via state!
+    const redirectUri = state as string;
+
+    try {
+      if (!code) throw new Error("No code provided");
+
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          code: code as string,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+        })
+      });
+      const tokenData = await tokenRes.json();
+      if (!tokenData.id_token) throw new Error("Failed to get ID token from Google");
+
+      const payload = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
+      
+      const email = payload.email;
+      const full_name = payload.name;
+      const display_name = payload.given_name;
+
+      const db = getDb();
+      let [rows]: any = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+      let user;
+
+      if (rows.length === 0) {
+        const id = crypto.randomUUID();
+        const randomPassword = crypto.randomBytes(16).toString('hex');
+        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        await db.query(
+          'INSERT INTO users (id, email, password, full_name, display_name) VALUES (?, ?, ?, ?, ?)',
+          [id, email, hashedPassword, full_name, display_name || full_name]
+        );
+        user = { id, email, name: full_name };
+      } else {
+        user = { id: rows[0].id, email: rows[0].email, name: rows[0].full_name || rows[0].display_name };
+      }
+
+      const token = jwt.sign(user, JWT_SECRET, { expiresIn: '7d' });
+
+      res.send(`
+        <html>
+          <body>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${token}', user: ${JSON.stringify(user)} }, '*');
+                window.close();
+              } else {
+                window.location.href = '/';
+              }
+            </script>
+            <p>Authentication successful. This window should close automatically.</p>
+          </body>
+        </html>
+      `);
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).send(`Authentication failed: ${e.message}`);
+    }
+  });
   
   app.get('/api/auth/me', authenticateToken, async (req: any, res) => {
      res.json({ user: req.user });

@@ -50,8 +50,46 @@ export const SignUp: React.FC = () => {
   };
 
   const handleGoogleLogin = async () => {
-     alert("Google Login needs to be reconfigured for your custom backend. Please set up a Google API project and integrate passport-google-oauth20 into server.ts");
+    try {
+      const redirectUri = `${window.location.origin}/api/auth/google/callback`;
+      const response = await fetch(`/api/auth/google/url?redirectUri=${encodeURIComponent(redirectUri)}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get auth URL');
+      }
+      const { url } = await response.json();
+
+      const authWindow = window.open(
+        url,
+        'oauth_popup',
+        'width=600,height=700'
+      );
+
+      if (!authWindow) {
+        alert('Please allow popups for this site to connect your account.');
+      }
+    } catch (error: any) {
+      console.error('OAuth error:', error);
+      setError(error.message);
+    }
   };
+
+  React.useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const origin = event.origin;
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+        return;
+      }
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        // the server sent token and user objects
+        localStorage.setItem('token', event.data.token);
+        // refresh the page or navigate to dashboard, AuthProvider will grab the token
+        window.location.href = RoutePath.HOME;
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   return (
     <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#F4F6F9] font-sans selection:bg-indigo-500/20">
