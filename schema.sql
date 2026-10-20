@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL,
     full_name VARCHAR(255),
     display_name VARCHAR(255),
+    reset_token VARCHAR(255),
+    reset_token_expires BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

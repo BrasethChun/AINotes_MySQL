@@ -5,9 +5,11 @@ import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { RoutePath } from '../../types';
 import { apiClient } from '../../src/apiClient';
+import { useAuth } from '../../context/AuthContext';
 
 export const SignUp: React.FC = () => {
   const navigate = useNavigate();
+  const { setUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,13 +85,13 @@ export const SignUp: React.FC = () => {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         // the server sent token and user objects
         localStorage.setItem('token', event.data.token);
-        // refresh the page or navigate to dashboard, AuthProvider will grab the token
-        window.location.href = RoutePath.HOME;
+        setUser(event.data.user);
+        navigate(RoutePath.HOME);
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [navigate, setUser]);
 
   return (
     <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#F4F6F9] font-sans selection:bg-indigo-500/20">

@@ -17,6 +17,11 @@ export const CreateNote: React.FC = () => {
   
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [meetingDate, setMeetingDate] = useState('');
+  const [meetingVenue, setMeetingVenue] = useState('');
+  const [agenda, setAgenda] = useState('');
+  const [meetingPriority, setMeetingPriority] = useState('Medium');
+  const [isMeetingTemplate, setIsMeetingTemplate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -81,6 +86,24 @@ export const CreateNote: React.FC = () => {
   const [newAttachments, setNewAttachments] = useState<File[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<NoteAttachment[]>([]);
 
+  const [customTemplates, setCustomTemplates] = useState<any[]>([]);
+  const [appliedTemplateId, setAppliedTemplateId] = useState<string>('');
+
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/note-templates', { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          setCustomTemplates(await res.json());
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchTemplates();
+  },[]);
+
   useEffect(() => {
     const checkLimitAndFetch = async () => {
       setLoading(true);
@@ -88,7 +111,9 @@ export const CreateNote: React.FC = () => {
         if (!id) {
           // If creating a NEW note, check count
           const count = await noteService.getCount();
-          if (count >= 5) {
+          // Check if user has Pro access to bypass the 5-note limit
+          const isPro = user?.role === 'admin' || user?.role === 'owner' || user?.can_access_pro === true || user?.can_access_pro === 1;
+          if (count >= 5 && !isPro) {
             setIsLimitReached(true);
             setLoading(false);
             return;
@@ -101,6 +126,11 @@ export const CreateNote: React.FC = () => {
             setContent(note.content);
             setImagePreview(note.thumbnailUrl || null);
             setExistingAttachments(note.attachments || []);
+            setMeetingDate(note.meetingDate || '');
+            setMeetingVenue(note.meetingVenue || '');
+            setAgenda(note.agenda || '');
+            setMeetingPriority(note.meetingPriority || 'Medium');
+            if (note.meetingDate || note.meetingVenue || note.agenda || note.meetingPriority) setIsMeetingTemplate(true);
           } else {
              navigate(RoutePath.NOTES);
           }
@@ -163,10 +193,11 @@ export const CreateNote: React.FC = () => {
       if (!user) throw new Error("Not authenticated");
 
       let noteId = id;
-      let noteData: any = { title, content, tags: [] };
+      let noteData: any = { title, content, tags: [], meetingDate, meetingVenue, agenda, meetingPriority, templateId: appliedTemplateId };
       
       if (!noteId) {
-        const newNote = await noteService.create(noteData);
+        const isPro = user?.role === 'admin' || user?.role === 'owner' || user?.can_access_pro === true || user?.can_access_pro === 1;
+        const newNote = await noteService.create(noteData, isPro);
         noteId = newNote.id;
       }
 
@@ -209,7 +240,11 @@ export const CreateNote: React.FC = () => {
         title,
         content,
         thumbnailUrl: finalThumbnailUrl || undefined,
-        attachments: finalAttachments
+        attachments: finalAttachments,
+        meetingDate,
+        meetingVenue,
+        agenda,
+        meetingPriority
       });
 
       navigate(RoutePath.NOTE_DETAIL.replace(':id', noteId));
@@ -250,7 +285,7 @@ export const CreateNote: React.FC = () => {
                 Plan Limit Reached
               </h2>
               <p className="text-slate-600 text-lg font-medium leading-relaxed max-w-sm mx-auto">
-                Free users can create a maximum of <span className="text-indigo-600 font-bold">5 notes</span>. Upgrade to Pro for unlimited creative space.
+                Free users can create a maximum of <span className="text-indigo-600 font-bold">5 notes</span>. Request a Pre-Upgrade to Pro for unlimited creative space.
               </p>
             </div>
 
@@ -258,11 +293,15 @@ export const CreateNote: React.FC = () => {
               <Button 
                 variant="primary" 
                 size="lg" 
-                className="rounded-full shadow-lg shadow-indigo-500/20 group h-14"
-                onClick={() => {}} // Placeholder for upgrade
+                className="rounded-full shadow-lg shadow-indigo-500/20 group h-14 w-full sm:w-auto"
+                onClick={() => {
+                  alert("Please contact your Account Owner or Systems Administrator to process the pre-upgrade to Pro.");
+                }} 
               >
                 <Sparkles size={18} className="mr-2 group-hover:rotate-12 transition-transform" />
-                <span>Upgrade to Pro</span>
+                <div className="flex flex-col items-center">
+                  <span>Pre-Upgrade to Pro</span>
+                </div>
                 <ChevronRight size={16} className="ml-1 opacity-60" />
               </Button>
               <Button 
@@ -275,7 +314,11 @@ export const CreateNote: React.FC = () => {
               </Button>
             </div>
             
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+            <p className="text-xs font-medium text-slate-500 mt-2">
+              For Account Owner or Systems Administrator
+            </p>
+            
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-4">
               Join 2,000+ users on Pro
             </p>
           </div>
@@ -283,6 +326,94 @@ export const CreateNote: React.FC = () => {
       </div>
     );
   }
+
+  const applyTemplate = (templateId: string) => {
+    setAppliedTemplateId(templateId);
+    if (templateId === 'it-meeting') {
+      setIsMeetingTemplate(true);
+      setTitle('IT Notes & Meeting Minutes');
+      setContent(`<h2>Meeting Details</h2>
+<ul>
+  <li><strong>Date & Time:</strong> [Date, Time]</li>
+  <li><strong>Location:</strong> [Location / Link]</li>
+  <li><strong>Attendees:</strong> [List names]</li>
+</ul>
+<br>
+<h2>1. Agenda</h2>
+<ul>
+  <li>[Agenda item 1]</li>
+  <li>[Agenda item 2]</li>
+</ul>
+<br>
+<h2>2. Discussion Notes</h2>
+<ul>
+  <li><strong>Topic 1:</strong> [Type notes here...]</li>
+  <li><strong>Topic 2:</strong> [Type notes here...]</li>
+</ul>
+<br>
+<h2>3. Key Decisions</h2>
+<ul>
+  <li>[Decision 1]</li>
+  <li>[Decision 2]</li>
+</ul>
+<br>
+<h2>4. Action Items</h2>
+<ul>
+  <li>[ ] [Action] - <strong>Owner:</strong> [Name] | <strong>Due:</strong> [Date]</li>
+  <li>[ ] [Action] - <strong>Owner:</strong> [Name] | <strong>Due:</strong> [Date]</li>
+</ul>
+<br>
+<h2>5. Next Meeting</h2>
+<ul>
+  <li><strong>Date & Time:</strong> [Next Meeting Date]</li>
+</ul>`);
+    } else if (templateId === 'ops-meeting') {
+      setIsMeetingTemplate(true);
+      setTitle('KHEMA - OPERATIONS MANAGEMENT Meeting ');
+      setContent(`<h2>Meeting Details</h2>
+<ul>
+  <li><strong>Date & Time:</strong> [Date, Time]</li>
+  <li><strong>Location:</strong> [Location / Link]</li>
+  <li><strong>Attendees:</strong> [List names]</li>
+</ul>
+<br>
+<h2>1. Agenda</h2>
+<ul>
+  <li>[Agenda item 1]</li>
+  <li>[Agenda item 2]</li>
+</ul>
+<br>
+<h2>2. Discussion Notes</h2>
+<ul>
+  <li><strong>Topic 1:</strong> [Type notes here...]</li>
+  <li><strong>Topic 2:</strong> [Type notes here...]</li>
+</ul>
+<br>
+<h2>3. Key Decisions</h2>
+<ul>
+  <li>[Decision 1]</li>
+  <li>[Decision 2]</li>
+</ul>
+<br>
+<h2>4. Action Items</h2>
+<ul>
+  <li>[ ] [Action] - <strong>Owner:</strong> [Name] | <strong>Due:</strong> [Date]</li>
+  <li>[ ] [Action] - <strong>Owner:</strong> [Name] | <strong>Due:</strong> [Date]</li>
+</ul>
+<br>
+<h2>5. Next Meeting</h2>
+<ul>
+  <li><strong>Date & Time:</strong> [Next Meeting Date]</li>
+</ul>`);
+    } else {
+        const tmpl = customTemplates.find(t => t.id === templateId);
+        if (tmpl) {
+            setIsMeetingTemplate(true);
+            if (tmpl.title) setTitle(tmpl.title);
+            if (tmpl.content) setContent(tmpl.content);
+        }
+    }
+  };
 
   const hasContent = content && content !== '<p><br></p>';
   const canSave = title.trim().length > 0 || hasContent;
@@ -358,6 +489,26 @@ export const CreateNote: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
+                   {!id && (
+                     <select 
+                       className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 outline-none hover:bg-white hover:text-slate-800 transition-all cursor-pointer shadow-sm max-w-[200px] truncate"
+                       onChange={(e) => applyTemplate(e.target.value)}
+                       defaultValue=""
+                     >
+                       <option value="" disabled>Apply Template...</option>
+                       <optgroup label="System Templates">
+                          <option value="it-meeting">IT Notes & Meetings</option>
+                          <option value="ops-meeting">KHEMA - OPERATIONS MANAGEMENT Meeting</option>
+                       </optgroup>
+                       {customTemplates.length > 0 && (
+                           <optgroup label="My Templates">
+                               {customTemplates.map(t => (
+                                   <option key={t.id} value={t.id}>{t.name}</option>
+                               ))}
+                           </optgroup>
+                       )}
+                     </select>
+                   )}
                    <label className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-white hover:text-indigo-600 hover:border-indigo-200 hover:shadow-sm">
                       <Paperclip size={14} className="text-slate-400 group-hover:text-indigo-500" />
                       <span>Attach File</span>
@@ -376,7 +527,7 @@ export const CreateNote: React.FC = () => {
             <div className="relative group">
               <input
                   type="text"
-                  placeholder="Untitled Note"
+                  placeholder="My notes"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full border-none bg-transparent text-4xl sm:text-5xl font-extrabold text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-0 p-0 mb-8 tracking-tight leading-tight pr-12"
@@ -392,7 +543,7 @@ export const CreateNote: React.FC = () => {
                 </button>
               )}
             </div>
-            
+
             <div className="relative min-h-[400px]">
                 <Editor 
                     value={content} 

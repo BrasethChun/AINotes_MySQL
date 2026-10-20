@@ -21,10 +21,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (token) {
         try {
           const data = await apiClient.fetch('/auth/me');
-          setUser(data.user);
-        } catch (error) {
-          console.error('Session init error:', error);
+          if (data && data.user) {
+            setUser(data.user);
+          } else {
+            apiClient.clearToken();
+            setUser(null);
+          }
+        } catch {
+          // Token is expired, invalid, or session obsolete; clear local session cleanly
           apiClient.clearToken();
+          setUser(null);
         }
       }
       setLoading(false);

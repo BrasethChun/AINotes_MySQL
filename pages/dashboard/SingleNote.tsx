@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Edit3, Trash2, ArrowLeft, Calendar, Clock, AlertCircle, Paperclip, FileText, Download } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { noteService } from '../../services/noteService';
@@ -10,6 +10,7 @@ import { StorageImage } from '../../components/ui/StorageImage';
 export const SingleNote: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -20,11 +21,16 @@ export const SingleNote: React.FC = () => {
     if (!id) return;
     const fetchNote = async () => {
       try {
-        const data = await noteService.getById(id);
+        const isPublicRoute = location.pathname.includes('/public/notes/');
+        const data = isPublicRoute ? await noteService.getPublicById(id) : await noteService.getById(id);
         if (data) {
           setNote(data);
         } else {
-          navigate(RoutePath.NOTES);
+          if (isPublicRoute) {
+            setError("This note could not be found or is not available publicly.");
+          } else {
+            navigate(RoutePath.NOTES);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch note", err);
@@ -86,17 +92,20 @@ export const SingleNote: React.FC = () => {
   };
 
   if (loading) return <div className="flex h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-200 border-t-zinc-900"></div></div>;
-  if (!note) return null;
+  if (!note && !error) return null;
+
+  const isPublicRoute = location.pathname.includes('/public/notes/');
 
   return (
     <>
       <div className="mx-auto max-w-3xl space-y-6 animate-in fade-in duration-300 pb-20 relative">
         {/* Sticky Header */}
         <div className="flex items-center justify-between sticky top-0 bg-[#FAFAFA]/90 backdrop-blur-sm py-4 z-10">
-          <Button variant="ghost" size="sm" onClick={() => navigate(RoutePath.NOTES)} className="-ml-3 text-zinc-500 hover:text-zinc-900">
+          <Button variant="ghost" size="sm" onClick={() => navigate(isPublicRoute ? RoutePath.HOME : RoutePath.NOTES)} className="-ml-3 text-zinc-500 hover:text-zinc-900">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
+          {!isPublicRoute && (
           <div className="flex gap-2">
             <Button 
               variant="secondary" 
@@ -119,6 +128,7 @@ export const SingleNote: React.FC = () => {
               Delete
             </Button>
           </div>
+          )}
         </div>
 
         {/* Error Message */}
@@ -130,6 +140,7 @@ export const SingleNote: React.FC = () => {
         )}
 
         {/* Note Content */}
+        {note && (
         <article className="rounded-xl border border-zinc-200/60 bg-white shadow-subtle overflow-hidden">
           {note.thumbnailUrl && (
             <div className="h-64 w-full bg-zinc-50 border-b border-zinc-100">
@@ -142,11 +153,11 @@ export const SingleNote: React.FC = () => {
           )}
           
           <div className="p-8 md:p-12">
-            <h1 className="mb-6 text-4xl font-bold tracking-tight text-zinc-900">{note.title}</h1>
+            <h1 className="mb-6 text-4xl font-bold tracking-tight text-zinc-900">{note.title || 'My notes'}</h1>
             
             <div className="mb-8 flex flex-wrap gap-4 text-xs font-medium uppercase tracking-wider text-zinc-400 border-b border-zinc-100 pb-6">
-              <span className="flex items-center"><Calendar size={14} className="mr-1.5 opacity-70" /> {new Date(note.createdAt).toLocaleDateString()}</span>
-              <span className="flex items-center"><Clock size={14} className="mr-1.5 opacity-70" /> {new Date(note.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+              <span className="flex items-center"><Calendar size={14} className="mr-1.5 opacity-70" /> Created: {new Date(note.createdAt).toLocaleDateString()}</span>
+              <span className="flex items-center"><Clock size={14} className="mr-1.5 opacity-70" /> Updated: {new Date(note.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
             </div>
 
             <div 
@@ -185,6 +196,7 @@ export const SingleNote: React.FC = () => {
             )}
           </div>
         </article>
+        )}
       </div>
 
       {/* Confirmation Modal */}

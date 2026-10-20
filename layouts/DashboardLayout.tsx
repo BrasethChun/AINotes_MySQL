@@ -12,6 +12,7 @@ export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   
   // Search State
@@ -108,7 +109,7 @@ export const DashboardLayout: React.FC = () => {
       <div className="fixed top-[-10%] left-[-10%] w-[500px] h-[500px] bg-sky-200/30 rounded-full blur-3xl pointer-events-none z-0 mix-blend-multiply" />
       <div className="fixed bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-indigo-200/30 rounded-full blur-3xl pointer-events-none z-0 mix-blend-multiply" />
       
-      <Sidebar />
+      <Sidebar isPinned={isSidebarPinned} onTogglePin={() => setIsSidebarPinned(!isSidebarPinned)} />
       
       {/* Mobile Header */}
       <div className="md:hidden flex items-center justify-between border-b border-white/60 bg-white/60 backdrop-blur-2xl px-4 py-3 sticky top-0 z-50">
@@ -118,7 +119,7 @@ export const DashboardLayout: React.FC = () => {
          </button>
       </div>
 
-      <main className="flex-1 flex flex-col min-h-screen md:pl-64 transition-all duration-300 relative z-10">
+      <main className={`flex-1 flex flex-col min-h-screen ${isSidebarPinned ? 'md:pl-64' : 'md:pl-20'} transition-all duration-300 relative z-10`}>
         
         {/* Top Header - Floating Glass Bar */}
         <div className="sticky top-4 z-30 px-4 lg:px-8 mb-4">
@@ -178,7 +179,7 @@ export const DashboardLayout: React.FC = () => {
                                             </div>
                                             <div className="min-w-0">
                                                 <h4 className="text-sm font-semibold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">
-                                                    {note.title || 'Untitled Note'}
+                                                    {note.title || 'My notes'}
                                                 </h4>
                                                 <p className="text-xs text-slate-500 truncate mt-0.5 opacity-80">
                                                     {getPreviewText(note.content) || 'No content'}

@@ -1,26 +1,48 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, ArrowUpRight, Calendar, Search } from 'lucide-react';
+import { Plus, FileText, ArrowUpRight, Calendar, Search, Bell } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Note, RoutePath } from '../../types';
 import { noteService } from '../../services/noteService';
 import { StorageImage } from '../../components/ui/StorageImage';
+import { SettingsModal } from './SettingsModal';
 
 export const MyNotes: React.FC = () => {
   const navigate = useNavigate();
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [periodFrom, setPeriodFrom] = useState('');
+  const [periodTo, setPeriodTo] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  const fetchNotes = async (query?: string) => {
-    if (query !== undefined) setIsSearching(true);
+  const fetchNotes = async (query: string, fromDate: string, toDate: string) => {
+    if (query !== '' || fromDate !== '' || toDate !== '') setIsSearching(true);
     else setLoading(true);
     
     try {
-      const data = query 
+      let data = query 
         ? await noteService.search(query)
         : await noteService.getAll();
+
+      if (fromDate) {
+        data = data.filter((n: Note) => {
+           const d = new Date(n.meetingDate || n.updatedAt || n.createdAt);
+           const frm = new Date(fromDate);
+           frm.setHours(0, 0, 0, 0);
+           return d >= frm;
+        });
+      }
+      if (toDate) {
+        const toD = new Date(toDate);
+        toD.setHours(23, 59, 59, 999);
+        data = data.filter((n: Note) => {
+           const d = new Date(n.meetingDate || n.updatedAt || n.createdAt);
+           return d <= toD;
+        });
+      }
+
       setNotes(data);
     } catch (error) {
       console.error("Failed to fetch notes", error);
@@ -30,25 +52,23 @@ export const MyNotes: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    fetchNotes();
-  }, []);
-
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchNotes(searchQuery);
+    fetchNotes(searchQuery, periodFrom, periodTo);
   };
 
   useEffect(() => {
+    fetchNotes(searchQuery, periodFrom, periodTo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodFrom, periodTo]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchQuery.trim() !== '') {
-        fetchNotes(searchQuery);
-      } else if (searchQuery === '' && !loading) {
-        fetchNotes();
-      }
+      fetchNotes(searchQuery, periodFrom, periodTo);
     }, 500);
 
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
   const getPreviewText = (html: string) => {
@@ -61,14 +81,38 @@ export const MyNotes: React.FC = () => {
     <div className="space-y-10 animate-in fade-in duration-500 pb-12">
       <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-slate-200 pb-6 gap-6">
         <div className="flex-1">
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">My Notes</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">IT Notes & Meetings</h1>
           <p className="text-slate-500 mt-2 text-base">
             Manage your personal knowledge base.
           </p>
         </div>
         
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          <div className="relative flex-1 md:w-64 group">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 mr-2">
+            <div className="flex items-center border border-slate-200 rounded-full bg-white px-3 py-1.5 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
+              <span className="text-xs font-semibold text-slate-400 mr-2 uppercase tracking-wide">From</span>
+              <input 
+                type="date"
+                title="Period From"
+                value={periodFrom}
+                onChange={(e) => setPeriodFrom(e.target.value)}
+                className="w-28 text-sm focus:outline-none text-slate-700 bg-transparent"
+              />
+            </div>
+            <span className="text-slate-300 font-medium">-</span>
+            <div className="flex items-center border border-slate-200 rounded-full bg-white px-3 py-1.5 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
+              <span className="text-xs font-semibold text-slate-400 mr-2 uppercase tracking-wide">To</span>
+              <input 
+                type="date"
+                title="Period To"
+                value={periodTo}
+                onChange={(e) => setPeriodTo(e.target.value)}
+                className="w-28 text-sm focus:outline-none text-slate-700 bg-transparent"
+              />
+            </div>
+          </div>
+          
+          <div className="relative flex-1 group min-w-[160px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
             <input 
               type="text"
@@ -83,10 +127,16 @@ export const MyNotes: React.FC = () => {
               </div>
             )}
           </div>
-          <Button onClick={() => navigate(RoutePath.CREATE_NOTE)} size="lg" className="rounded-full shadow-lg shadow-indigo-500/20 whitespace-nowrap">
-            <Plus className="mr-2 h-5 w-5" />
-            Create Note
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setIsSettingsOpen(true)} variant="secondary" size="md" className="rounded-full shadow-sm whitespace-nowrap h-10 px-4">
+              <Bell className="mr-2 h-4 w-4 text-indigo-500" />
+              Settings
+            </Button>
+            <Button onClick={() => navigate(RoutePath.CREATE_NOTE)} size="md" className="rounded-full shadow-lg shadow-indigo-500/20 whitespace-nowrap h-10 px-5">
+              <Plus className="mr-2 h-4 w-4" />
+              New Note
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -132,7 +182,7 @@ export const MyNotes: React.FC = () => {
               
               <div className="flex flex-1 flex-col p-6">
                 <h3 className="mb-2 text-lg font-bold tracking-tight text-slate-900 leading-snug group-hover:text-indigo-600 transition-colors">
-                  {note.title}
+                  {note.title || 'My notes'}
                 </h3>
                 
                 <p className="text-slate-500 line-clamp-3 leading-relaxed text-sm mb-5 font-light">
@@ -177,6 +227,8 @@ export const MyNotes: React.FC = () => {
              )}
           </div>
       )}
+
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 };

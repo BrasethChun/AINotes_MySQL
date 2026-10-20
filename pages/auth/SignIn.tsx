@@ -81,12 +81,13 @@ export const SignIn: React.FC = () => {
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         localStorage.setItem('token', event.data.token);
-        window.location.href = RoutePath.HOME;
+        setUser(event.data.user);
+        navigate(RoutePath.HOME);
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [navigate, setUser]);
 
   return (
     <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#F4F6F9] font-sans selection:bg-indigo-500/20">
@@ -179,7 +180,7 @@ export const SignIn: React.FC = () => {
                       </div>
                       <span className="text-xs font-medium text-slate-500 group-hover/chk:text-slate-800 transition-colors">Remember me</span>
                   </label>
-                  <a href="#" className="text-xs font-semibold text-indigo-600 hover:text-indigo-500 transition-colors hover:underline decoration-2 underline-offset-2">Forgot password?</a>
+                  <Link to="/forgot-password" className="text-xs font-semibold text-indigo-600 hover:text-indigo-500 transition-colors hover:underline decoration-2 underline-offset-2">Forgot password?</Link>
               </div>
 
               <Button 

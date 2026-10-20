@@ -25,6 +25,8 @@ export const Account: React.FC = () => {
   });
   const [avatarPath, setAvatarPath] = useState<string | null>(null);
 
+  const [saveStatus, setSaveStatus] = useState<{type: 'success' | 'error', message: string} | null>(null);
+
   // Set local state based on auth context
   useEffect(() => {
     if (user) {
@@ -80,14 +82,19 @@ export const Account: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setSaveStatus(null);
 
     try {
       // In full backend, we'd update the user
       // await apiClient.fetch('/auth/me', { method: 'PUT', body: JSON.stringify(formData) });
-      setTimeout(() => setLoading(false), 500);
+      setTimeout(() => {
+        setLoading(false);
+        setSaveStatus({ type: 'success', message: 'Changes saved successfully!' });
+        setTimeout(() => setSaveStatus(null), 3000);
+      }, 500);
     } catch (error) {
       console.error("Error updating profile:", error);
-      alert("Failed to update profile.");
+      setSaveStatus({ type: 'error', message: 'Failed to update profile.' });
       setLoading(false);
     }
   };
@@ -211,9 +218,11 @@ export const Account: React.FC = () => {
                                     className="w-full appearance-none rounded-2xl border border-white/50 bg-white/70 pl-12 pr-5 py-4 text-[15px] font-medium text-slate-900 shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-all duration-300 hover:bg-white/90 hover:shadow-md focus:border-indigo-500/30 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
                                 >
                                     <option>UTC-8 (Pacific Time)</option>
+                                    <option>UTC-7 (Asia)</option>
                                     <option>UTC-5 (Eastern Time)</option>
                                     <option>UTC+0 (London)</option>
                                     <option>UTC+1 (Paris)</option>
+                                    <option>UTC+7 (Asia)</option>
                                     <option>UTC+9 (Tokyo)</option>
                                 </select>
                                 <ChevronRight className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 rotate-90 pointer-events-none" size={16} />
@@ -292,7 +301,7 @@ export const Account: React.FC = () => {
                 </div>
 
                 {/* Footer Action Bar */}
-                <div className="sticky bottom-0 z-10 flex items-center justify-between border-t border-white/60 bg-white/70 px-8 py-5 backdrop-blur-xl">
+                <div className="sticky bottom-0 z-10 flex flex-col md:flex-row items-center justify-between border-t border-white/60 bg-white/70 px-8 py-5 backdrop-blur-xl gap-4">
                     <button 
                         type="button" 
                         onClick={handleSignOut}
@@ -300,7 +309,12 @@ export const Account: React.FC = () => {
                     >
                         Sign Out
                     </button>
-                    <div className="flex gap-4">
+                    <div className="flex items-center gap-4">
+                         {saveStatus && (
+                             <span className={`text-sm font-medium ${saveStatus.type === 'success' ? 'text-emerald-600' : 'text-red-600'} animate-in fade-in slide-in-from-right-4 duration-300`}>
+                                 {saveStatus.message}
+                             </span>
+                         )}
                          <Button type="button" variant="ghost" onClick={() => navigate(RoutePath.HOME)}>
                              Cancel
                          </Button>

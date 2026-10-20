@@ -33,10 +33,14 @@ export const apiClient = {
       headers
     });
 
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       // Token expired or invalid
       this.clearToken();
-      window.location.href = '/login';
+      if (!window.location.hash.includes('/public/notes/')) {
+        if (window.location.hash && window.location.hash !== '#/login' && window.location.hash !== '#/signup') {
+          window.location.hash = '#/login';
+        }
+      }
     }
 
     if (!response.ok) {

@@ -25,6 +25,16 @@ export const noteService = {
     }
   },
 
+  getPublicById: async (id: string): Promise<Note | undefined> => {
+    try {
+       const res = await fetch(`/api/public/notes/${id}`);
+       if (!res.ok) throw new Error('Not found');
+       return await res.json();
+    } catch {
+       return undefined;
+    }
+  },
+
   // Search notes by title or content
   search: async (query: string): Promise<Note[]> => {
     await delay(300); // Small delay for UX
@@ -37,11 +47,13 @@ export const noteService = {
   },
 
   // Create a new note
-  create: async (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>): Promise<Note> => {
+  create: async (note: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>, bypassLimit?: boolean): Promise<Note> => {
     // SaaS Limit Check
-    const currentCount = await noteService.getCount();
-    if (currentCount >= NOTE_LIMIT) {
-      throw new Error('FREE_LIMIT_REACHED');
+    if (!bypassLimit) {
+      const currentCount = await noteService.getCount();
+      if (currentCount >= NOTE_LIMIT) {
+        throw new Error('FREE_LIMIT_REACHED');
+      }
     }
 
     return apiClient.fetch('/notes', {
