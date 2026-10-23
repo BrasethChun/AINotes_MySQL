@@ -1150,9 +1150,9 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
               <Cloud size={20} />
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Khema Global Cloud Subscription</h2>
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Khema Global Cloud & HIS Subscription</h2>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Centralized database management for cloud infrastructure, SaaS licenses, billing cycles, and automated renewal monitoring.
+                Centralized database management for cloud infrastructure, Hospital Information System (HIS) licenses, SaaS subscriptions, billing cycles, and automated renewal monitoring.
               </p>
             </div>
           </div>

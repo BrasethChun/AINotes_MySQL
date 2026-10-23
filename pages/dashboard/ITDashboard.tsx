@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams, useNavigate } from 'react-router-dom';
 import { 
-  Users, Wrench, Monitor, GraduationCap, Shield, Activity, DollarSign,
+  Users, Wrench, Monitor, Shield, Activity, DollarSign,
   Download, Filter, CheckCircle2, AlertCircle, Clock, BarChart3, AlertTriangle, X,
   Plus, Edit, Trash2, Save, MapPin
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { RoutePath } from '../../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
   LineChart, Line, PieChart, Pie, Cell, Legend
@@ -14,7 +15,6 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { AssetsModule } from './AssetsModule';
 import { SettingsModule } from './SettingsModule';
-import { MyNotes } from './MyNotes';
 import { CloudSubscriptionsModule } from './CloudSubscriptionsModule';
 import { ExecutiveSummaryModule } from './ExecutiveSummaryModule';
 import { Cloud } from 'lucide-react';
@@ -71,17 +71,20 @@ export const ITDashboard: React.FC = () => {
   const [dbKpis, setDbKpis] = useState(KPI_DATA);
   const [sites, setSites] = useState<any[]>([{ id: '1', site_name: 'Main Hospital' }, { id: '2', site_name: 'North Clinic' }, { id: '3', site_name: 'South Clinic' }]);
 
+  const navigate = useNavigate();
   const itTabs = [
     { id: 'executive', label: 'Executive Summary', icon: BarChart3 },
-    { id: 'subscriptions', label: 'Cloud Subscriptions', icon: Cloud },
+    { id: 'subscriptions', label: 'Cloud & HIS Subscriptions', icon: Cloud },
     { id: 'assets', label: 'Assets Inventory', icon: Monitor },
     { id: 'helpdesk', label: 'Helpdesk Tickets', icon: Wrench },
     { id: 'staffing', label: 'Staffing & Shifts', icon: Users },
-    { id: 'sites', label: 'Sites & Settings', icon: MapPin },
-    { id: 'notes', label: 'IT Notes & Meetings', icon: GraduationCap },
   ];
 
   const handleTabChange = (tabId: string) => {
+    if (tabId === 'notes') {
+      navigate(RoutePath.NOTES);
+      return;
+    }
     setSearchParams({ tab: tabId });
   };
 
@@ -242,7 +245,7 @@ export const ITDashboard: React.FC = () => {
       )}
 
       {/* Content Area */}
-      <div className="bg-white/80 backdrop-blur-2xl rounded-2xl border border-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] min-h-[600px]">
+      <div className="bg-white/80 backdrop-blur-2xl rounded-2xl border border-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] min-h-[600px] overflow-x-auto">
         {activeTab === 'executive' && (
           <ExecutiveSummaryModule 
             kpis={dbKpis} 
@@ -258,11 +261,13 @@ export const ITDashboard: React.FC = () => {
         {activeTab === 'staffing' && <StaffingReport sites={sites} />}
         {activeTab === 'helpdesk' && <HelpDeskReport sites={sites} />}
         {activeTab === 'assets' && <AssetsModule sites={sites} />}
-        {activeTab === 'notes' && <MyNotes />}
-        {activeTab === 'sites' && <SettingsModule sites={sites} fetchSites={() => {
-           fetch('/api/sites', { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } })
-           .then(r => r.json()).then(data => { if (Array.isArray(data)) setSites(data); });
-        }} />}
+        {activeTab === 'sites' && (
+          <div className="p-8 bg-white rounded-2xl border border-slate-200 text-center flex flex-col items-center gap-4 my-6">
+            <h3 className="text-lg font-semibold text-slate-800">Settings Moved</h3>
+            <p className="text-slate-500 text-sm max-w-md">Sites and system settings have been moved to the main sidebar Settings page for centralized administration.</p>
+            <Button onClick={() => window.location.hash = '#/settings'}>Open Main Settings</Button>
+          </div>
+        )}
       </div>
     </div>
   );

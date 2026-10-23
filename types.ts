@@ -29,6 +29,7 @@ export interface User {
   email: string;
   avatarUrl?: string;
   role?: string;
+  status?: string;
   can_access_welcome?: boolean;
   can_access_it?: boolean;
   can_access_pro?: boolean;
@@ -51,4 +52,38 @@ export enum RoutePath {
   CREATE_INVOICE = '/invoices/new',
   EDIT_INVOICE = '/invoices/:id/edit',
   VENDORS = '/vendors',
+  MAIL_ASSISTANT = '/mail',
+}
+
+export interface MailAccount {
+  id: string;
+  user_id: string;
+  email: string;
+  provider: string;
+  imap_host: string;
+  imap_port: number;
+  smtp_host: string;
+  smtp_port: number;
+  username: string;
+  auto_sync_interval: number;
+  last_synced_at?: string;
+  is_active: boolean;
+}
+
+export interface MailMessage {
+  id: string;
+  account_id: string;
+  user_id: string;
+  folder: 'inbox' | 'sent' | 'starred' | 'trash' | 'drafts';
+  message_id: string;
+  from_address: string;
+  from_name: string;
+  to_address: string;
+  subject: string;
+  snippet: string;
+  body_text: string;
+  body_html?: string;
+  is_read: boolean;
+  is_starred: boolean;
+  received_at: string;
 }

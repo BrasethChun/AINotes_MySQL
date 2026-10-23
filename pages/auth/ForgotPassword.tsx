@@ -10,12 +10,14 @@ export const ForgotPassword: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setSuccess(null);
+    setResetToken(null);
 
     const formData = new FormData(e.currentTarget as HTMLFormElement);
     const email = formData.get('email') as string;
@@ -27,6 +29,9 @@ export const ForgotPassword: React.FC = () => {
       });
 
       setSuccess(data.message || 'Password reset link sent.');
+      if (data.token) {
+        setResetToken(data.token);
+      }
     } catch (err: any) {
       console.error('Error:', err);
       setError(err.message || 'An unexpected error occurred');
@@ -67,9 +72,22 @@ export const ForgotPassword: React.FC = () => {
             </p>
 
             {success && (
-               <div className="mt-6 flex w-full items-start gap-3 rounded-xl border border-emerald-200/60 bg-emerald-50/80 p-4 text-sm text-emerald-800 backdrop-blur-md shadow-sm animate-in fade-in slide-in-from-top-2">
-                  <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                  <span className="font-medium leading-relaxed">{success}</span>
+               <div className="mt-6 flex flex-col w-full gap-3 rounded-2xl border border-emerald-200/60 bg-emerald-50/90 p-5 text-sm text-emerald-800 backdrop-blur-md shadow-sm animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                    <div>
+                      <h4 className="font-semibold text-emerald-900">Reset Link Ready</h4>
+                      <p className="mt-0.5 text-xs text-emerald-700 leading-relaxed">Your password reset verification token has been generated.</p>
+                    </div>
+                  </div>
+                  {resetToken && (
+                    <Link
+                      to={`/reset-password?token=${resetToken}`}
+                      className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm transition-all shadow-md shadow-indigo-600/20"
+                    >
+                      <span>Set New Password Now →</span>
+                    </Link>
+                  )}
                </div>
             )}
           

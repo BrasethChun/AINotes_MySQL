@@ -95,10 +95,13 @@ fi
 if [ -n "$SQL_FILE" ]; then
   for TARGET_DB in "ainotes" "ainotes_db"; do
     TABLE_COUNT=$($ADMIN_CLI -D "$TARGET_DB" -N -s -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${TARGET_DB}';" 2>/dev/null || echo "0")
-    if [ "$TABLE_COUNT" -eq 0 ]; then
-      echo "Seeding ${TARGET_DB} database from $SQL_FILE..."
+    USER_COUNT=$($ADMIN_CLI -D "$TARGET_DB" -N -s -e "SELECT COUNT(*) FROM users;" 2>/dev/null || echo "0")
+    if [ "$TABLE_COUNT" -eq 0 ] || [ "$USER_COUNT" -eq 0 ]; then
+      echo "Seeding and restoring ${TARGET_DB} database from $SQL_FILE..."
       $ADMIN_CLI "$TARGET_DB" < "$SQL_FILE" || true
     fi
+    $ADMIN_CLI -D "$TARGET_DB" -e "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Active';" 2>/dev/null || true
+    $ADMIN_CLI -D "$TARGET_DB" -e "UPDATE users SET password = '\$2b\$10\$86Hg7inHqb3XOYApNN.L9OMmMD1C6ils50GSJU3deQD0KaYWW7z6e' WHERE email IN ('prorsethchun2014@gmail.com', 'prorseth@gmail.com');" 2>/dev/null || true
   done
 fi
 

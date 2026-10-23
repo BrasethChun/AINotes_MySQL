@@ -2,25 +2,56 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, X } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 
-export const SettingsModule = ({ sites, fetchSites }: any) => {
-  const [activeTab, setActiveTab] = useState('sites');
+export const SettingsModule = ({ sites: propSites, fetchSites: propFetchSites, defaultTab = 'sites', hideTabs = false }: any) => {
+  const [internalSites, setInternalSites] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState(defaultTab);
+
+  useEffect(() => {
+    if (defaultTab) setActiveTab(defaultTab);
+  }, [defaultTab]);
+
+  const fetchSites = () => {
+    if (propFetchSites) {
+      propFetchSites();
+    } else {
+      const token = localStorage.getItem('token');
+      fetch('/api/sites', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setInternalSites(data);
+      })
+      .catch(err => console.log('Failed to fetch sites', err));
+    }
+  };
+
+  useEffect(() => {
+    if (!propSites) {
+      fetchSites();
+    }
+  }, [propSites]);
+
+  const sites = propSites || internalSites;
 
   return (
     <div className="animate-in slide-in-from-bottom-4 duration-500 flex flex-col gap-6">
-      <div className="flex border-b border-slate-200">
-        <button 
-          className={`pb-3 px-6 text-sm font-medium transition-colors ${activeTab === 'sites' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}
-          onClick={() => setActiveTab('sites')}
-        >
-          Sites Management
-        </button>
-        <button 
-          className={`pb-3 px-6 text-sm font-medium transition-colors ${activeTab === 'asset_categories' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}
-          onClick={() => setActiveTab('asset_categories')}
-        >
-          Asset Categories
-        </button>
-      </div>
+      {!hideTabs && (
+        <div className="flex border-b border-slate-200">
+          <button 
+            className={`pb-3 px-6 text-sm font-medium transition-colors ${activeTab === 'sites' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}
+            onClick={() => setActiveTab('sites')}
+          >
+            Sites Management
+          </button>
+          <button 
+            className={`pb-3 px-6 text-sm font-medium transition-colors ${activeTab === 'asset_categories' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}
+            onClick={() => setActiveTab('asset_categories')}
+          >
+            Asset Categories
+          </button>
+        </div>
+      )}
 
       {activeTab === 'sites' && <SitesReport sites={sites} fetchSites={fetchSites} />}
       {activeTab === 'asset_categories' && <AssetCategoriesReport />}

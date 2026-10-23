@@ -56,18 +56,23 @@ The AI Notes platform is designed for enterprise healthcare and corporate IT dep
 
 ## 3. Global Navigation & Layout
 
-The application features a responsive sidebar accessible from every authenticated view:
+The application features a responsive, collapsible sidebar accessible from every authenticated view:
 
-- **Executive Summary** (`/#/it-dashboard?tab=executive`): Top-level management KPIs, cross-module rollups, and consolidated report export.
-- **Cloud Subscriptions** (`/#/it-dashboard?tab=subscriptions`): Multi-cloud infrastructure and SaaS license cost tracking.
-- **Assets Inventory** (`/#/it-dashboard?tab=assets`): Physical hardware, servers, and software license lifecycle.
-- **Helpdesk Tickets** (`/#/it-dashboard?tab=helpdesk`): Incident queue, SLA compliance, and technician assignment.
-- **Staffing & Shifts** (`/#/it-dashboard?tab=staffing`): IT personnel roster, monthly site shift schedules, and on-call rotations.
-- **Sites & Settings** (`/#/it-dashboard?tab=sites`): Healthcare facilities, clinics, and departmental configuration.
-- **Vendors** (`/#/vendors`): 3rd-party technology vendors, agreements, and support escalations.
-- **Invoices** (`/#/invoices`): Billing records, purchase orders, and payment approvals.
-- **IT Notes** (`/#/notes`): Technical documentation, standard operating procedures, and meeting minutes.
+- **Home** (`/#/`): Landing hub, quick access cards, and personal overview.
+- **IT Dashboard** (`/#/it-dashboard`): Collapsible executive & operational analytics suite:
+  - **Executive Summary** (`/#/it-dashboard?tab=executive`): Top-level management KPIs, cross-module rollups, and consolidated report export.
+  - **Staffing & Shifts** (`/#/it-dashboard?tab=staffing`): IT personnel roster, monthly site shift schedules, and on-call rotations.
+  - **Helpdesk Tickets** (`/#/it-dashboard?tab=helpdesk`): Incident queue, SLA compliance, and technician assignment.
+  - **Assets Inventory** (`/#/it-dashboard?tab=assets`): Physical hardware, servers, and software license lifecycle.
+  - **Cloud Subscriptions** (`/#/it-dashboard?tab=subscriptions`): Multi-cloud infrastructure and SaaS license cost tracking.
+  - **Vendor Management** (`/#/vendors`): 3rd-party technology vendors, agreements, and support escalations.
+- **IT Tools** (Dedicated operational utility suite directly below IT Dashboard):
+  - **Mail Assistant** (`/#/mail`): Bluehost webmail integration with 3-column split view, Inbox & Sent synchronization, automated polling, and Gemini-powered smart email drafting and replies.
+  - **IT Notes & Meetings** (`/#/notes`): Technical documentation, SOPs, agendas, and meeting minutes.
+  - **Invoices** (`/#/invoices`): Billing records, purchase orders, PDF generation, and payment approvals.
+- **Create Note** (`/#/notes/new`): Rich-text markdown editor for authoring new technical documentation.
 - **Account** (`/#/account`): User profile, role badges, and credential updates.
+- **Settings** (`/#/settings`): Centralized system settings featuring Sites & Facilities, Asset Categories taxonomy, and User Roles & Access.
 
 ---
 
@@ -242,11 +247,21 @@ Accessed via **IT Notes** (`/#/notes`) and **Create Note** (`/#/notes/create`).
 
 ---
 
-## 13. Profile & Personal Settings
+## 13. System Settings & User Role Administration
 
-Accessed via **Account** (`/#/account`) and **Settings** (`/#/settings`).
+Accessed via **Settings** (`/#/settings`) from the primary sidebar navigation.
 
-- **User Profile**: Update your display name, email, and avatar.
-- **Security**: Change your account password.
-- **Theme & Appearance**: Switch between Light, Dark, and System UI themes.
-- **Notification Preferences**: Configure email alerts for ticket assignments and subscription renewals.
+### 13.1 User Roles & Access Management
+The **User Roles & Access** tab provides enterprise-grade identity and access management:
+- **Active / In-Active Account Status**: Toggle users between `Active` and `In-Active` with a single click. In-active accounts are immediately barred from logging into the platform (`HTTP 403 Forbidden`).
+- **Direct Password Reset**: Click the amber Key icon on any user row to open the quick Reset Password modal. Administrators can input a custom password or click **"Generate Strong"** to produce a 12-character high-entropy secret, with a one-click copy-to-clipboard button and password visibility toggle.
+- **Edit User Account**: Click the pencil icon to modify full name, email, system role (`Owner`, `Admin`, `User`), account status, module permissions (Dashboard, IT Suite, Pro Access), or set a new password.
+- **Delete User Account**: Permanently remove user profiles with confirmation. The system enforces strict protection preventing administrators from deleting their own active account.
+- **Add New User**: Use the **+ Add User** button to register a team member directly with predefined roles and permissions.
+- **Search & Filters**: Instantly filter users by name, email, role, or active status.
+
+### 13.2 Profile & Personal Settings
+Accessed via **Account** (`/#/account`):
+- **User Profile**: Update your personal display name, email, and avatar.
+- **Security**: Update personal passwords securely with bcrypt encryption.
+- **Role Badges**: Review currently assigned enterprise roles and access permissions.

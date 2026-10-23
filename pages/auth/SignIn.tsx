@@ -165,10 +165,16 @@ export const SignIn: React.FC = () => {
               </div>
               
               {error && (
-                <div className="mt-2 text-center">
-                  <p className="text-sm font-medium text-red-500 animate-in fade-in slide-in-from-top-1">
+                <div className="mt-2 p-3.5 rounded-2xl bg-red-50/90 border border-red-200/80 text-left animate-in fade-in slide-in-from-top-1 shadow-sm">
+                  <p className="text-sm font-semibold text-red-700">
                     {error}
                   </p>
+                  <div className="mt-2 pt-2 border-t border-red-100 flex items-center justify-between text-xs">
+                    <span className="text-slate-600">Trouble signing in?</span>
+                    <Link to="/forgot-password" className="font-semibold text-indigo-600 hover:text-indigo-800 underline">
+                      Reset Password →
+                    </Link>
+                  </div>
                 </div>
               )}
               
@@ -190,6 +196,23 @@ export const SignIn: React.FC = () => {
               >
                 Sign In
               </Button>
+
+              {/* Quick Fill Credentials Helper */}
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const emailInput = document.getElementById('email') as HTMLInputElement;
+                    const passInput = document.getElementById('password') as HTMLInputElement;
+                    if (emailInput) emailInput.value = 'prorsethchun2014@gmail.com';
+                    if (passInput) passInput.value = 'password123';
+                    setError(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50/80 hover:bg-indigo-100/90 text-indigo-700 text-xs font-medium transition-colors border border-indigo-100"
+                >
+                  <span>Quick Fill: prorsethchun2014@gmail.com</span>
+                </button>
+              </div>
             </form>
 
             {/* Divider */}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, FileText, PlusCircle, Settings, LogOut, Command, LogIn, BarChart, ChevronDown, ChevronRight, User, ReceiptText } from 'lucide-react';
+import { Home, FileText, PlusCircle, Settings, LogOut, Command, LogIn, BarChart, ChevronDown, ChevronRight, User, ReceiptText, Wrench } from 'lucide-react';
 import { RoutePath } from '../types';
 import { useAuth } from '../context/AuthContext';
 
@@ -13,7 +13,14 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
   const searchParams = new URLSearchParams(search);
   const currentTab = searchParams.get('tab') || 'executive';
 
-  const [itDashboardOpen, setItDashboardOpen] = useState(pathname === RoutePath.IT_DASHBOARD || pathname === RoutePath.INVOICES);
+  const [itDashboardOpen, setItDashboardOpen] = useState(pathname === RoutePath.IT_DASHBOARD || pathname === RoutePath.VENDORS);
+  const [itToolsOpen, setItToolsOpen] = useState(
+    pathname === RoutePath.NOTES || 
+    pathname === RoutePath.MAIL_ASSISTANT ||
+    pathname.startsWith('/mail') ||
+    pathname.startsWith(RoutePath.INVOICES) || 
+    (pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE)
+  );
 
   const handleLogout = () => {
     logout();
@@ -26,27 +33,60 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
 
   const navItems = [
     ...(user?.can_access_welcome !== false && user?.can_access_welcome !== 0 ? [{ icon: Home, label: 'Home', path: RoutePath.HOME }] : []),
-    ...(user?.role === 'admin' || user?.role === 'owner' || user?.can_access_it === true || user?.can_access_it === 1 ? [{ 
-      icon: BarChart, 
-      label: 'IT Dashboard', 
-      path: RoutePath.IT_DASHBOARD,
-      subItems: [
-        { label: 'Staffing', id: 'staffing' },
-        { label: 'Helpdesk', id: 'helpdesk' },
-        { label: 'Assets', id: 'assets' },
-        { label: 'Cloud Subscriptions', id: 'subscriptions' },
-        { label: 'Vendor Management', id: 'vendors', path: RoutePath.VENDORS },
-        { label: 'Settings', id: 'sites' },
-        { label: 'IT Notes & Meetings', id: 'notes' },
-        { label: 'Invoices', id: 'invoices', path: RoutePath.INVOICES }
-      ]
-    }] : []),
+    ...(user?.role === 'admin' || user?.role === 'owner' || user?.can_access_it === true || user?.can_access_it === 1 ? [
+      { 
+        icon: BarChart, 
+        label: 'IT Dashboard', 
+        path: RoutePath.IT_DASHBOARD,
+        isOpen: itDashboardOpen,
+        toggleOpen: () => {
+          if (!getIsActive(RoutePath.IT_DASHBOARD, 'IT Dashboard') || currentTab !== 'executive') {
+            navigate(RoutePath.IT_DASHBOARD);
+            setItDashboardOpen(true);
+          } else {
+            setItDashboardOpen(!itDashboardOpen);
+          }
+        },
+        subItems: [
+          { label: 'Executive Summary', id: 'executive', path: `${RoutePath.IT_DASHBOARD}?tab=executive` },
+          { label: 'Staffing', id: 'staffing', path: `${RoutePath.IT_DASHBOARD}?tab=staffing` },
+          { label: 'Helpdesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` },
+          { label: 'Assets', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },
+          { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` },
+          { label: 'Vendor Management', id: 'vendors', path: RoutePath.VENDORS }
+        ]
+      },
+      {
+        icon: Wrench,
+        label: 'IT Tools',
+        path: RoutePath.MAIL_ASSISTANT,
+        isOpen: itToolsOpen,
+        toggleOpen: () => {
+          if (!getIsActive(RoutePath.MAIL_ASSISTANT, 'IT Tools')) {
+            navigate(RoutePath.MAIL_ASSISTANT);
+            setItToolsOpen(true);
+          } else {
+            setItToolsOpen(!itToolsOpen);
+          }
+        },
+        subItems: [
+          { label: 'Mail Assistant', id: 'mail', path: RoutePath.MAIL_ASSISTANT },
+          { label: 'IT Notes & Meetings', id: 'notes', path: RoutePath.NOTES },
+          { label: 'Invoices', id: 'invoices', path: RoutePath.INVOICES }
+        ]
+      }
+    ] : []),
     { icon: PlusCircle, label: 'Create Note', path: RoutePath.CREATE_NOTE },
     { icon: User, label: 'Account', path: RoutePath.ACCOUNT },
-    ...(user?.role === 'admin' || user?.role === 'owner' ? [{ icon: Settings, label: 'Settings', path: RoutePath.SETTINGS }] : []),
+    ...(user?.role === 'admin' || user?.role === 'owner' || user?.can_access_it === true || user?.can_access_it === 1 ? [{ icon: Settings, label: 'Settings', path: RoutePath.SETTINGS }] : []),
   ];
 
-  const getIsActive = (path: string) => {
+  const getIsActive = (path: string, itemLabel?: string) => {
+    if (itemLabel === 'IT Tools') {
+      return (pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE) || 
+             pathname.startsWith(RoutePath.INVOICES) ||
+             pathname.startsWith(RoutePath.MAIL_ASSISTANT);
+    }
     if (path === RoutePath.HOME) {
       return pathname === RoutePath.HOME;
     }
@@ -57,7 +97,7 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
       return pathname === RoutePath.CREATE_NOTE;
     }
     if (path === RoutePath.IT_DASHBOARD) {
-      return pathname === RoutePath.IT_DASHBOARD || pathname === RoutePath.INVOICES || pathname === RoutePath.VENDORS;
+      return pathname === RoutePath.IT_DASHBOARD || pathname === RoutePath.VENDORS;
     }
     return pathname.startsWith(path);
   };
@@ -81,21 +121,14 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
 
       <div className="flex-1 py-6 px-4 overflow-y-auto hide-scrollbar">
         <nav className="space-y-2">
-          {navItems.map((item) => {
-            const isActive = getIsActive(item.path);
+          {navItems.map((item: any) => {
+            const isActive = getIsActive(item.path, item.label);
             
             if (item.subItems) {
               return (
-                <div key={item.path} className="flex flex-col gap-1">
+                <div key={item.label} className="flex flex-col gap-1">
                   <button
-                    onClick={() => {
-                      if (!isActive || currentTab !== 'executive') {
-                        navigate(item.path);
-                        setItDashboardOpen(true);
-                      } else {
-                        setItDashboardOpen(!itDashboardOpen);
-                      }
-                    }}
+                    onClick={item.toggleOpen}
                     className={`flex items-center justify-between rounded-full py-3.5 text-sm transition-all duration-300 ${isPinned ? 'px-5' : 'px-3 md:group-hover:px-5'} ${
                       isActive
                         ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-semibold shadow-[0_4px_15px_rgba(129,140,248,0.25)] translate-x-1'
@@ -107,14 +140,20 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
                       <span className={`transition-opacity whitespace-nowrap overflow-hidden flex-1 text-left ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 md:group-hover:opacity-100 w-0 md:group-hover:w-auto'}`}>{item.label}</span>
                     </div>
                     <div className={`transition-opacity shrink-0 ${isPinned ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
-                      {itDashboardOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      {item.isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </div>
                   </button>
                   
-                  {isActive && itDashboardOpen && (
+                  {isActive && item.isOpen && (
                     <div className="pl-6 pr-2 py-2 space-y-1 animate-in slide-in-from-top-2 fade-in duration-200">
                       {item.subItems.map((subItem: any) => {
-                        const isSubActive = (subItem.path && pathname === subItem.path) || (!subItem.path && currentTab === subItem.id);
+                        const isSubActive = subItem.path 
+                          ? (subItem.path.includes('?tab=') 
+                              ? pathname === subItem.path.split('?')[0] && currentTab === subItem.id 
+                              : (subItem.path === RoutePath.NOTES 
+                                  ? pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE 
+                                  : pathname.startsWith(subItem.path)))
+                          : currentTab === subItem.id;
                         return (
                           <Link
                             key={subItem.id}

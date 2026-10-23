@@ -17,6 +17,7 @@ import { ITDashboard } from './pages/dashboard/ITDashboard';
 import { VendorList } from './pages/dashboard/VendorList';
 import { CreateInvoice } from './pages/dashboard/CreateInvoice';
 import { InvoicesList } from './pages/dashboard/InvoicesList';
+import { MailAssistant } from './pages/dashboard/MailAssistant';
 import { RoutePath } from './types';
 
 function App() {
@@ -42,6 +43,7 @@ function App() {
             <Route path={RoutePath.IT_DASHBOARD} element={<ProtectedRoute><ITDashboard /></ProtectedRoute>} />
             <Route path={RoutePath.VENDORS} element={<ProtectedRoute><VendorList /></ProtectedRoute>} />
             <Route path={RoutePath.INVOICES} element={<ProtectedRoute><InvoicesList /></ProtectedRoute>} />
+            <Route path={RoutePath.MAIL_ASSISTANT} element={<ProtectedRoute><MailAssistant /></ProtectedRoute>} />
             <Route path={RoutePath.CREATE_INVOICE} element={<ProtectedRoute><CreateInvoice /></ProtectedRoute>} />
             <Route path={RoutePath.EDIT_INVOICE} element={<ProtectedRoute><CreateInvoice /></ProtectedRoute>} />
             <Route path={RoutePath.CREATE_NOTE} element={<ProtectedRoute><CreateNote /></ProtectedRoute>} />

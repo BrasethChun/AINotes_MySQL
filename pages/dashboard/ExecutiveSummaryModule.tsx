@@ -303,140 +303,144 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
         </div>
       </div>
 
-      {/* TOP CONSOLIDATED 6 DOMAIN KPI CARDS (All Tabs at a glance) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        {/* 1. Cloud Subscriptions */}
-        <div 
-          onClick={() => onNavigateTab('subscriptions')}
-          className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group relative overflow-hidden"
-        >
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Cloud Spend</span>
-            <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 group-hover:scale-110 transition-transform">
-              <Cloud size={18} />
+      {/* TOP CONSOLIDATED 6 DOMAIN KPI CARDS (All Tabs at a glance - Enhanced UI Scroll to fit grid) */}
+      <div className="w-full overflow-x-auto pb-2 pt-0.5 -mx-1 px-1 scroll-smooth">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3.5 min-w-[740px] xl:min-w-0">
+          {/* 1. Cloud Subscriptions */}
+          <div 
+            onClick={() => onNavigateTab('subscriptions')}
+            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
+          >
+            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Cloud Spend">Cloud Spend</span>
+              <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 group-hover:scale-110 transition-transform shrink-0">
+                <Cloud size={18} />
+              </div>
+            </div>
+            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
+              ${(cloudSummary.totalMonthlySpend || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              <span className="text-xs text-slate-500 font-normal">/mo</span>
+            </p>
+            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
+              <span className="text-emerald-600 font-semibold truncate">{cloudSummary.activeCount || 0} Subs</span>
+              <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
+                View <ChevronRight size={12} />
+              </span>
             </div>
           </div>
-          <p className="text-xl font-bold text-slate-900 tracking-tight">
-            ${(cloudSummary.totalMonthlySpend || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            <span className="text-xs text-slate-500 font-normal">/mo</span>
-          </p>
-          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100">
-            <span className="text-emerald-600 font-semibold">{cloudSummary.activeCount || 0} Subscriptions</span>
-            <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
-              View <ChevronRight size={12} />
-            </span>
-          </div>
-        </div>
 
-        {/* 2. IT Assets */}
-        <div 
-          onClick={() => onNavigateTab('assets')}
-          className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group relative overflow-hidden"
-        >
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Hardware Fleet</span>
-            <div className="p-2 rounded-xl bg-blue-50 text-blue-600 group-hover:scale-110 transition-transform">
-              <Monitor size={18} />
+          {/* 2. IT Assets */}
+          <div 
+            onClick={() => onNavigateTab('assets')}
+            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
+          >
+            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Hardware Fleet">Hardware Fleet</span>
+              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 group-hover:scale-110 transition-transform shrink-0">
+                <Monitor size={18} />
+              </div>
+            </div>
+            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
+              {assetMetrics.total} <span className="text-xs text-slate-500 font-normal">Assets</span>
+            </p>
+            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
+              <span className="text-slate-600 truncate max-w-[90px]" title={`$${assetMetrics.totalValue.toLocaleString()}`}>
+                ${Math.round(assetMetrics.totalValue).toLocaleString()} Val
+              </span>
+              <span className="text-blue-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
+                View <ChevronRight size={12} />
+              </span>
             </div>
           </div>
-          <p className="text-xl font-bold text-slate-900 tracking-tight">
-            {assetMetrics.total} <span className="text-xs text-slate-500 font-normal">Assets</span>
-          </p>
-          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100">
-            <span className="text-slate-600 truncate max-w-[90px]" title={`$${assetMetrics.totalValue.toLocaleString()}`}>
-              ${Math.round(assetMetrics.totalValue).toLocaleString()} Val
-            </span>
-            <span className="text-blue-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
-              View <ChevronRight size={12} />
-            </span>
-          </div>
-        </div>
 
-        {/* 3. Helpdesk Tickets */}
-        <div 
-          onClick={() => onNavigateTab('helpdesk')}
-          className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-amber-300 transition-all cursor-pointer group relative overflow-hidden"
-        >
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Helpdesk</span>
-            <div className="p-2 rounded-xl bg-amber-50 text-amber-600 group-hover:scale-110 transition-transform">
-              <Wrench size={18} />
+          {/* 3. Helpdesk Tickets */}
+          <div 
+            onClick={() => onNavigateTab('helpdesk')}
+            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-amber-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
+          >
+            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Helpdesk">Helpdesk</span>
+              <div className="p-2 rounded-xl bg-amber-50 text-amber-600 group-hover:scale-110 transition-transform shrink-0">
+                <Wrench size={18} />
+              </div>
+            </div>
+            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
+              {ticketMetrics.total} <span className="text-xs text-slate-500 font-normal">Tickets</span>
+            </p>
+            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
+              <span className="text-emerald-600 font-semibold truncate">{ticketMetrics.resolutionRate}% Done</span>
+              <span className="text-amber-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
+                View <ChevronRight size={12} />
+              </span>
             </div>
           </div>
-          <p className="text-xl font-bold text-slate-900 tracking-tight">
-            {ticketMetrics.total} <span className="text-xs text-slate-500 font-normal">Tickets</span>
-          </p>
-          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100">
-            <span className="text-emerald-600 font-semibold">{ticketMetrics.resolutionRate}% Done</span>
-            <span className="text-amber-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
-              View <ChevronRight size={12} />
-            </span>
-          </div>
-        </div>
 
-        {/* 4. IT Staffing */}
-        <div 
-          onClick={() => onNavigateTab('staffing')}
-          className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group relative overflow-hidden"
-        >
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">IT Engineers</span>
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:scale-110 transition-transform">
-              <Users size={18} />
+          {/* 4. IT Staffing (Selected Element in Focus Mode) */}
+          <div 
+            onClick={() => onNavigateTab('staffing')}
+            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
+          >
+            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="IT Engineers">
+                IT Engineers
+              </span>
+              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:scale-110 transition-transform shrink-0">
+                <Users size={18} />
+              </div>
+            </div>
+            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
+              {staffMetrics.total} <span className="text-xs text-slate-500 font-normal">Specialists</span>
+            </p>
+            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
+              <span className="text-emerald-600 font-semibold truncate">{staffMetrics.avgScore}/5.0 Score</span>
+              <span className="text-emerald-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
+                View <ChevronRight size={12} />
+              </span>
             </div>
           </div>
-          <p className="text-xl font-bold text-slate-900 tracking-tight">
-            {staffMetrics.total} <span className="text-xs text-slate-500 font-normal">Specialists</span>
-          </p>
-          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100">
-            <span className="text-emerald-600 font-semibold">{staffMetrics.avgScore}/5.0 Score</span>
-            <span className="text-emerald-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
-              View <ChevronRight size={12} />
-            </span>
-          </div>
-        </div>
 
-        {/* 5. Connected Sites */}
-        <div 
-          onClick={() => onNavigateTab('sites')}
-          className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-purple-300 transition-all cursor-pointer group relative overflow-hidden"
-        >
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Facilities</span>
-            <div className="p-2 rounded-xl bg-purple-50 text-purple-600 group-hover:scale-110 transition-transform">
-              <Building2 size={18} />
+          {/* 5. Connected Sites */}
+          <div 
+            onClick={() => onNavigateTab('sites')}
+            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-purple-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
+          >
+            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Facilities">Facilities</span>
+              <div className="p-2 rounded-xl bg-purple-50 text-purple-600 group-hover:scale-110 transition-transform shrink-0">
+                <Building2 size={18} />
+              </div>
+            </div>
+            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
+              {sites.length} <span className="text-xs text-slate-500 font-normal">Sites</span>
+            </p>
+            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
+              <span className="text-purple-600 font-semibold truncate">100% Online</span>
+              <span className="text-purple-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
+                View <ChevronRight size={12} />
+              </span>
             </div>
           </div>
-          <p className="text-xl font-bold text-slate-900 tracking-tight">
-            {sites.length} <span className="text-xs text-slate-500 font-normal">Sites</span>
-          </p>
-          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100">
-            <span className="text-purple-600 font-semibold">100% Online</span>
-            <span className="text-purple-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
-              View <ChevronRight size={12} />
-            </span>
-          </div>
-        </div>
 
-        {/* 6. IT Notes & Governance */}
-        <div 
-          onClick={() => onNavigateTab('notes')}
-          className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-teal-300 transition-all cursor-pointer group relative overflow-hidden"
-        >
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Strategy & Notes</span>
-            <div className="p-2 rounded-xl bg-teal-50 text-teal-600 group-hover:scale-110 transition-transform">
-              <FileText size={18} />
+          {/* 6. IT Notes & Governance */}
+          <div 
+            onClick={() => onNavigateTab('notes')}
+            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-teal-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
+          >
+            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Strategy & Notes">Strategy & Notes</span>
+              <div className="p-2 rounded-xl bg-teal-50 text-teal-600 group-hover:scale-110 transition-transform shrink-0">
+                <FileText size={18} />
+              </div>
             </div>
-          </div>
-          <p className="text-xl font-bold text-slate-900 tracking-tight">
-            {notes.length} <span className="text-xs text-slate-500 font-normal">Records</span>
-          </p>
-          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100">
-            <span className="text-teal-600 font-semibold">SLA Reviews</span>
-            <span className="text-teal-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
-              View <ChevronRight size={12} />
-            </span>
+            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
+              {notes.length} <span className="text-xs text-slate-500 font-normal">Records</span>
+            </p>
+            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
+              <span className="text-teal-600 font-semibold truncate">SLA Reviews</span>
+              <span className="text-teal-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
+                View <ChevronRight size={12} />
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -451,7 +455,7 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                  Khema Global Cloud Subscriptions
+                  Khema Global Cloud & HIS Subscriptions
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
                   {cloudSummary.totalCount || 0} Subscriptions
@@ -758,27 +762,29 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
           </div>
         </div>
 
-        {/* 4-Stage Ticket Pipeline Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/70 border-l-4 border-l-slate-400">
-            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Not Started</span>
-            <p className="text-2xl font-bold text-slate-800 mt-1">{ticketMetrics.notStarted}</p>
-            <span className="text-[10px] text-slate-400">Pending intake</span>
-          </div>
-          <div className="bg-amber-50/50 rounded-xl p-3.5 border border-amber-200/70 border-l-4 border-l-amber-500">
-            <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider">In Progress</span>
-            <p className="text-2xl font-bold text-amber-900 mt-1">{ticketMetrics.inProgress}</p>
-            <span className="text-[10px] text-amber-600">Active troubleshooting</span>
-          </div>
-          <div className="bg-sky-50/50 rounded-xl p-3.5 border border-sky-200/70 border-l-4 border-l-sky-500">
-            <span className="text-[11px] font-semibold text-sky-700 uppercase tracking-wider">Testing / QA</span>
-            <p className="text-2xl font-bold text-sky-900 mt-1">{ticketMetrics.testing}</p>
-            <span className="text-[10px] text-sky-600">User verification</span>
-          </div>
-          <div className="bg-emerald-50/50 rounded-xl p-3.5 border border-emerald-200/70 border-l-4 border-l-emerald-500">
-            <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Completed</span>
-            <p className="text-2xl font-bold text-emerald-900 mt-1">{ticketMetrics.completed}</p>
-            <span className="text-[10px] text-emerald-600">SLA satisfied</span>
+        {/* 4-Stage Ticket Pipeline Cards (Responsive scroll to fit grid) */}
+        <div className="w-full overflow-x-auto pb-2 -mx-1 px-1">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2 min-w-[480px] sm:min-w-0">
+            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/70 border-l-4 border-l-slate-400">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate block">Not Started</span>
+              <p className="text-2xl font-bold text-slate-800 mt-1">{ticketMetrics.notStarted}</p>
+              <span className="text-[10px] text-slate-400">Pending intake</span>
+            </div>
+            <div className="bg-amber-50/50 rounded-xl p-3.5 border border-amber-200/70 border-l-4 border-l-amber-500">
+              <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider truncate block">In Progress</span>
+              <p className="text-2xl font-bold text-amber-900 mt-1">{ticketMetrics.inProgress}</p>
+              <span className="text-[10px] text-amber-600">Active troubleshooting</span>
+            </div>
+            <div className="bg-sky-50/50 rounded-xl p-3.5 border border-sky-200/70 border-l-4 border-l-sky-500">
+              <span className="text-[11px] font-semibold text-sky-700 uppercase tracking-wider truncate block">Testing / QA</span>
+              <p className="text-2xl font-bold text-sky-900 mt-1">{ticketMetrics.testing}</p>
+              <span className="text-[10px] text-sky-600">User verification</span>
+            </div>
+            <div className="bg-emerald-50/50 rounded-xl p-3.5 border border-emerald-200/70 border-l-4 border-l-emerald-500">
+              <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider truncate block">Completed</span>
+              <p className="text-2xl font-bold text-emerald-900 mt-1">{ticketMetrics.completed}</p>
+              <span className="text-[10px] text-emerald-600">SLA satisfied</span>
+            </div>
           </div>
         </div>
 

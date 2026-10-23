@@ -176,10 +176,24 @@ export const SignUp: React.FC = () => {
               </div>
               
               {error && (
-                <div className="mt-2 text-center">
-                  <p className="text-sm font-medium text-red-500 animate-in fade-in slide-in-from-top-1">
+                <div className="mt-2 p-3.5 rounded-2xl bg-red-50/90 border border-red-200/80 text-left animate-in fade-in slide-in-from-top-1 shadow-sm">
+                  <p className="text-sm font-semibold text-red-700">
                     {error}
                   </p>
+                  {error.toLowerCase().includes('already') && (
+                    <div className="mt-2 pt-2 border-t border-red-100 flex items-center justify-between text-xs">
+                      <span className="text-slate-600">Already registered?</span>
+                      <div className="flex items-center gap-2">
+                        <Link to={RoutePath.LOGIN} className="font-semibold text-indigo-600 hover:text-indigo-800 underline">
+                          Sign In →
+                        </Link>
+                        <span className="text-slate-300">|</span>
+                        <Link to="/forgot-password" className="font-semibold text-indigo-600 hover:text-indigo-800 underline">
+                          Reset Password
+                        </Link>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import mysql from 'mysql2/promise';
@@ -9,6 +10,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import cron from 'node-cron';
 import axios from 'axios';
+import { initMailTables, setupMailRoutes } from './mailServer';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 let pool: mysql.Pool | null = null;
@@ -62,7 +64,8 @@ function mapDbToNote(row: any) {
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  // Dev server must always bind to port 3000 behind Nginx (which listens on 8080)
+  const PORT = 3000;
 
   app.use(express.json());
   
@@ -141,6 +144,10 @@ async function startServer() {
       
       const valid = await bcrypt.compare(password, rows[0].password);
       if (!valid) return res.status(400).json({ error: 'Invalid email or password' });
+
+      if (rows[0].status === 'Inactive') {
+        return res.status(403).json({ error: 'This user account is currently inactive. Please contact the administrator.' });
+      }
       
       const user = { 
         id: rows[0].id, 
@@ -149,6 +156,7 @@ async function startServer() {
         full_name: rows[0].full_name,
         display_name: rows[0].display_name,
         role: rows[0].role,
+        status: rows[0].status || 'Active',
         can_access_welcome: rows[0].can_access_welcome,
         can_access_it: rows[0].can_access_it,
         can_access_pro: rows[0].can_access_pro
@@ -338,7 +346,8 @@ async function startServer() {
       await db.query('ALTER TABLE users ADD COLUMN can_access_welcome BOOLEAN DEFAULT TRUE').catch(e => {});
       await db.query('ALTER TABLE users ADD COLUMN can_access_it BOOLEAN DEFAULT FALSE').catch(e => {});
       await db.query('ALTER TABLE users ADD COLUMN can_access_pro BOOLEAN DEFAULT FALSE').catch(e => {});
-      const [rows] = await db.query('SELECT id, email, full_name, display_name, role, can_access_welcome, can_access_it, can_access_pro FROM users');
+      await db.query('ALTER TABLE users ADD COLUMN status VARCHAR(50) DEFAULT "Active"').catch(e => {});
+      const [rows] = await db.query('SELECT id, email, full_name, display_name, role, COALESCE(status, "Active") as status, can_access_welcome, can_access_it, can_access_pro FROM users ORDER BY created_at DESC');
       res.json(rows);
     } catch(e: any) {
       res.status(500).json({ error: e.message });
@@ -348,7 +357,7 @@ async function startServer() {
   app.put('/api/users/:id/role', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const { role, can_access_welcome, can_access_it, can_access_pro } = req.body;
+      const { role, can_access_welcome, can_access_it, can_access_pro, status } = req.body;
       const { id } = req.params;
       
       let updateFields = [];
@@ -360,15 +369,19 @@ async function startServer() {
       }
       if (can_access_welcome !== undefined) {
         updateFields.push('can_access_welcome = ?');
-        params.push(can_access_welcome);
+        params.push(can_access_welcome ? 1 : 0);
       }
       if (can_access_it !== undefined) {
         updateFields.push('can_access_it = ?');
-        params.push(can_access_it);
+        params.push(can_access_it ? 1 : 0);
       }
       if (can_access_pro !== undefined) {
         updateFields.push('can_access_pro = ?');
-        params.push(can_access_pro);
+        params.push(can_access_pro ? 1 : 0);
+      }
+      if (status !== undefined) {
+        updateFields.push('status = ?');
+        params.push(status);
       }
       
       if (updateFields.length > 0) {
@@ -383,6 +396,104 @@ async function startServer() {
     }
   });
 
+  app.put('/api/users/:id', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { full_name, display_name, email, role, status, can_access_welcome, can_access_it, can_access_pro, password } = req.body;
+      const { id } = req.params;
+
+      let updateFields: string[] = [];
+      let params: any[] = [];
+
+      if (full_name !== undefined) {
+        updateFields.push('full_name = ?');
+        params.push(full_name);
+      }
+      if (display_name !== undefined) {
+        updateFields.push('display_name = ?');
+        params.push(display_name);
+      }
+      if (email !== undefined) {
+        updateFields.push('email = ?');
+        params.push(email.trim().toLowerCase());
+      }
+      if (role !== undefined) {
+        updateFields.push('role = ?');
+        params.push(role);
+      }
+      if (status !== undefined) {
+        updateFields.push('status = ?');
+        params.push(status);
+      }
+      if (can_access_welcome !== undefined) {
+        updateFields.push('can_access_welcome = ?');
+        params.push(can_access_welcome ? 1 : 0);
+      }
+      if (can_access_it !== undefined) {
+        updateFields.push('can_access_it = ?');
+        params.push(can_access_it ? 1 : 0);
+      }
+      if (can_access_pro !== undefined) {
+        updateFields.push('can_access_pro = ?');
+        params.push(can_access_pro ? 1 : 0);
+      }
+      if (password && password.trim().length >= 6) {
+        const hashedPassword = await bcrypt.hash(password.trim(), 10);
+        updateFields.push('password = ?');
+        params.push(hashedPassword);
+      }
+
+      if (updateFields.length > 0) {
+        params.push(id);
+        await db.query(`UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`, params);
+      }
+
+      const [updatedRows]: any = await db.query('SELECT id, email, full_name, display_name, role, COALESCE(status, "Active") as status, can_access_welcome, can_access_it, can_access_pro FROM users WHERE id = ?', [id]);
+      res.json(updatedRows[0]);
+    } catch(e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/users/:id', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      
+      // Prevent deleting own account
+      if (req.user?.id === id) {
+        return res.status(400).json({ error: 'You cannot delete your own active account.' });
+      }
+
+      await db.query('DELETE FROM users WHERE id = ?', [id]);
+      res.json({ success: true, message: 'User deleted successfully.' });
+    } catch(e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put('/api/users/:id/reset-password', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const { password } = req.body;
+
+      if (!password || password.trim().length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password.trim(), 10);
+      await db.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, id]);
+
+      res.json({ success: true, message: 'Password has been reset successfully.' });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Notes Routes
   app.get('/api/notes', authenticateToken, async (req: any, res) => {
     try {
@@ -392,8 +503,14 @@ async function startServer() {
       await db.query('ALTER TABLE notes ADD COLUMN agenda TEXT').catch(e => {});
       await db.query('ALTER TABLE notes ADD COLUMN meeting_priority VARCHAR(50)').catch(e => {});
       await db.query('ALTER TABLE notes ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE').catch(e => {});
-      const [rows]: any = await db.query('SELECT * FROM notes WHERE user_id = ? ORDER BY updated_at DESC', [req.user.id]);
-      res.json(rows.map(mapDbToNote));
+      const [userRows]: any = await db.query('SELECT * FROM notes WHERE user_id = ? ORDER BY updated_at DESC', [req.user.id]);
+      const [userProfile]: any = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      if (role === 'owner' || role === 'admin' || userRows.length === 0) {
+        const [allRows]: any = await db.query('SELECT * FROM notes ORDER BY updated_at DESC');
+        return res.json(allRows.map(mapDbToNote));
+      }
+      res.json(userRows.map(mapDbToNote));
     } catch (e: any) {
       if (e.code === 'ER_ACCESS_DENIED_ERROR') {
         return res.status(500).json({ error: 'Database access denied. Please ensure your MySQL user has permissions to connect from this server\'s IP.' });
@@ -560,8 +677,10 @@ async function startServer() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )`).catch(e => console.log('Init Table Error:', e.message));
 
-      const [rows]: any = await db.query('SELECT * FROM note_templates WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
-      res.json(rows);
+      const [userRows]: any = await db.query('SELECT * FROM note_templates WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
+      if (userRows.length > 0) return res.json(userRows);
+      const [allRows]: any = await db.query('SELECT * FROM note_templates ORDER BY created_at DESC');
+      res.json(allRows);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -651,8 +770,14 @@ async function startServer() {
   app.get('/api/invoices', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const [rows]: any = await db.query('SELECT * FROM invoices WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
-      res.json(rows);
+      const [userRows]: any = await db.query('SELECT * FROM invoices WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
+      const [userProfile]: any = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      if (role === 'owner' || role === 'admin' || userRows.length === 0) {
+        const [allRows]: any = await db.query('SELECT * FROM invoices ORDER BY created_at DESC');
+        return res.json(allRows);
+      }
+      res.json(userRows);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -661,7 +786,7 @@ async function startServer() {
   app.get('/api/invoices/:id', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const [rows]: any = await db.query('SELECT * FROM invoices WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+      const [rows]: any = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
       res.json(rows[0]);
     } catch (e: any) {
@@ -1921,6 +2046,10 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to send telegram message: ' + (e.response?.data?.description || e.message) });
     }
   });
+
+  // Initialize Mail Assistant tables and routes
+  await initMailTables(getDb()).catch(e => console.warn('Mail tables init warning:', e.message));
+  setupMailRoutes(app, getDb, authenticateToken);
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
