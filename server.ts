@@ -2599,6 +2599,19 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+
+    // Non-blocking background verification of local MariaDB replica daemon (if local standalone mode)
+    const isRemoteDb = process.env.PRIMARY_DB === 'godaddy' || (process.env.MYSQL_HOST && process.env.MYSQL_HOST !== '127.0.0.1' && process.env.MYSQL_HOST !== 'localhost');
+    if (!isRemoteDb && fs.existsSync('./start-db.sh')) {
+      import('child_process').then(({ spawn }) => {
+        try {
+          const child = spawn('bash', ['./start-db.sh'], { detached: true, stdio: 'ignore' });
+          child.unref();
+        } catch (e: any) {
+          console.warn('[Background DB Starter]:', e.message);
+        }
+      }).catch(() => {});
+    }
   });
 }
 

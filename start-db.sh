@@ -1,28 +1,21 @@
 #!/usr/bin/env bash
 set -e
 
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
 # Unset conflicting client flags during local admin actions
 ADMIN_CLI="mariadb --protocol=socket -u root"
 
-# 1. Install MariaDB if missing
-if ! command -v mariadbd >/dev/null 2>&1; then
-  echo "MariaDB binary not found. Installing..."
-  export DEBIAN_FRONTEND=noninteractive
-  DEB_DIR=""
-  if [ -d "/app/applet/.mariadb-debs" ] && [ -n "$(ls -A /app/applet/.mariadb-debs 2>/dev/null)" ]; then
-    DEB_DIR="/app/applet/.mariadb-debs"
-  elif [ -d "./.mariadb-debs" ] && [ -n "$(ls -A ./.mariadb-debs 2>/dev/null)" ]; then
-    DEB_DIR="./.mariadb-debs"
-  fi
+# 1. If running with GoDaddy MySQL as primary, exit immediately
+if [ "${PRIMARY_DB}" = "godaddy" ] || [ "${MYSQL_HOST}" != "127.0.0.1" -a "${MYSQL_HOST}" != "localhost" -a -n "${MYSQL_HOST}" ]; then
+  echo "Using remote GoDaddy MySQL (${MYSQL_HOST:-118.139.180.163}) as primary database. Local MariaDB script bypassed."
+  exit 0
+fi
 
-  if [ -n "$DEB_DIR" ]; then
-    echo "Installing MariaDB from persistent offline cache ($DEB_DIR)..."
-    dpkg -i --force-depends $DEB_DIR/*.deb >/dev/null 2>&1 || true
-    apt-get install -f -y -qq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" >/dev/null 2>&1 || true
-  else
-    apt-get update -qq
-    apt-get install -y -qq mariadb-server -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
-  fi
+# 2. Check if MariaDB binary is present
+if ! command -v mariadbd >/dev/null 2>&1 && [ ! -x "/usr/sbin/mariadbd" ]; then
+  echo "Local MariaDB daemon binary not installed. Using GoDaddy MySQL as primary database."
+  exit 0
 fi
 
 # 2. Prepare directories & permissions
@@ -131,11 +124,6 @@ BUN_EOF
   chmod +x /usr/local/bin/bun 2>/dev/null || true
 fi
 
-# 9. Ensure node dependencies and tsx are installed
-if [ ! -f "./node_modules/.bin/tsx" ]; then
-  echo "Node dependencies missing. Installing with npm..."
-  npm install --no-audit --no-fund
-fi
 
 echo "Database and environment initialization complete."
 exit 0

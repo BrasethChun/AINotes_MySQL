@@ -1,3 +1,8 @@
+# Environment files (NEVER commit secrets to GitHub)
+.env
+.env.*
+!.env.example
+
 # Logs
 logs
 *.log
@@ -7,10 +12,15 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies & Build artifacts
 node_modules
 dist
 dist-ssr
 *.local
+
+# User uploads & temporary storage
+uploads/*
+!uploads/.gitkeep
 
 # Editor directories and files
 .vscode/*
@@ -23,6 +33,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Bun lockfiles
+# Lockfiles
 bun.lock
 bun.lockb
