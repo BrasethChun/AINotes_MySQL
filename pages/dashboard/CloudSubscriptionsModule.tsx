@@ -125,7 +125,7 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
   const [sortKey, setSortKey] = useState<keyof CloudSubscription>('renewal_date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   // Selection & Modals
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -162,7 +162,7 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
   const [importMode, setImportMode] = useState<'file' | 'paste'>('file');
   const [importFileName, setImportFileName] = useState('');
   const [importPasteText, setImportPasteText] = useState('');
-  const [importReplaceExisting, setImportReplaceExisting] = useState(true);
+  const [importReplaceExisting, setImportReplaceExisting] = useState(false);
   const [importParsedData, setImportParsedData] = useState<any[]>([]);
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
@@ -1526,6 +1526,34 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
         </div>
       </div>
 
+      {/* Active Filter Notice if any records are hidden */}
+      {filteredSubscriptions.length < subscriptions.length && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50/90 border border-amber-200/90 px-4 py-2.5 text-xs text-amber-900 shadow-sm animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span>
+              Active Filter: Showing <strong>{filteredSubscriptions.length}</strong> of <strong>{subscriptions.length}</strong> cloud subscriptions (Some records are hidden by active search/filters).
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchTerm('');
+              setProviderFilter('All Providers');
+              setCategoryFilter('All Categories');
+              setSiteFilter('All Sites');
+              setStatusFilter('All Statuses');
+              setBillingFilter('All Cycles');
+              setQuickFilter('all');
+              setCurrentPage(1);
+            }}
+            className="font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 flex items-center gap-1 cursor-pointer"
+          >
+            Clear all filters (Show all {subscriptions.length} records)
+          </button>
+        </div>
+      )}
+
       {/* Subscriptions Data Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -1852,10 +1880,11 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
               onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
               className="border border-slate-200 rounded-lg px-2 py-1 bg-white text-xs text-slate-700 outline-none"
             >
-              <option value={5}>5 per page</option>
               <option value={10}>10 per page</option>
-              <option value={20}>20 per page</option>
+              <option value={25}>25 per page</option>
               <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+              <option value={500}>All (No pagination)</option>
             </select>
           </div>
 
@@ -3061,22 +3090,28 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
               )}
 
               {/* Import Options */}
-              <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-100 space-y-2">
+              <div className={`p-3 rounded-xl border transition-colors space-y-2 ${
+                importReplaceExisting 
+                  ? 'bg-rose-50/70 border-rose-200 text-rose-900' 
+                  : 'bg-emerald-50/60 border-emerald-100 text-emerald-900'
+              }`}>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={importReplaceExisting}
                     onChange={(e) => setImportReplaceExisting(e.target.checked)}
-                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                    className="rounded border-slate-300 text-rose-600 focus:ring-rose-500 h-4 w-4"
                   />
-                  <span className="text-xs text-slate-700 font-medium">
-                    Clean restore: Replace existing cloud subscriptions in database
+                  <span className="text-xs font-semibold">
+                    {importReplaceExisting
+                      ? '⚠️ Danger: Replace & erase existing cloud subscriptions in database'
+                      : 'Safe Append Mode: Add imported subscriptions without deleting existing ones'}
                   </span>
                 </label>
-                <p className="text-[11px] text-slate-500 ml-6">
+                <p className="text-[11px] ml-6 opacity-85">
                   {importReplaceExisting
-                    ? 'All previous subscriptions will be replaced with this imported dataset.'
-                    : 'The imported subscriptions will be appended to your current catalog.'}
+                    ? 'Caution: All current subscriptions in the database will be permanently wiped and replaced by this import file.'
+                    : 'Recommended: Existing subscriptions will be safely preserved, and imported records will be added to your catalog.'}
                 </p>
               </div>
             </div>

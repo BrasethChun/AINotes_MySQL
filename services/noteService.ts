@@ -72,26 +72,29 @@ export const noteService = {
 
   // Delete a note and its associated files
   delete: async (id: string): Promise<void> => {
-    // 1. Get note to find files to delete
-    const note = await noteService.getById(id);
-    
-    if (note) {
-      const pathsToDelete: string[] = [];
-      
-      // Add thumbnail if it's a storage path
-      if (note.thumbnailUrl && !note.thumbnailUrl.startsWith('http')) {
-        pathsToDelete.push(note.thumbnailUrl);
-      }
+    // 1. Get note to find files to delete (best effort, do not block note deletion)
+    try {
+      const note = await noteService.getById(id);
+      if (note) {
+        const pathsToDelete: string[] = [];
+        
+        // Add thumbnail if it's a storage path
+        if (note.thumbnailUrl && !note.thumbnailUrl.startsWith('http')) {
+          pathsToDelete.push(note.thumbnailUrl);
+        }
 
-      // Add attachment paths
-      if (note.attachments && note.attachments.length > 0) {
-        note.attachments.forEach(att => pathsToDelete.push(att.path));
-      }
+        // Add attachment paths
+        if (note.attachments && note.attachments.length > 0) {
+          note.attachments.forEach(att => pathsToDelete.push(att.path));
+        }
 
-      // Delete files from storage
-      if (pathsToDelete.length > 0) {
-        await storageService.deleteFiles(pathsToDelete);
+        // Delete files from storage
+        if (pathsToDelete.length > 0) {
+          await storageService.deleteFiles(pathsToDelete).catch(() => {});
+        }
       }
+    } catch (err) {
+      console.warn("Could not inspect attachments before note deletion:", err);
     }
 
     // 2. Delete from DB

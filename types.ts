@@ -65,9 +65,14 @@ export interface MailAccount {
   smtp_host: string;
   smtp_port: number;
   username: string;
+  password?: string;
+  has_password?: boolean;
   auto_sync_interval: number;
   last_synced_at?: string;
   is_active: boolean;
+  compose_signature?: string;
+  reply_signature?: string;
+  include_reply_signature?: boolean;
 }
 
 export interface MailMessage {
@@ -79,6 +84,11 @@ export interface MailMessage {
   from_address: string;
   from_name: string;
   to_address: string;
+  cc_address?: string;
+  reply_to_id?: string;
+  is_replied?: boolean;
+  replied_at?: string;
+  thread_history?: MailMessage[];
   subject: string;
   snippet: string;
   body_text: string;
@@ -86,4 +96,5 @@ export interface MailMessage {
   is_read: boolean;
   is_starred: boolean;
   received_at: string;
+  created_at?: string;
 }

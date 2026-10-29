@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { RoutePath } from '../../types';
 import { Button } from '../../components/ui/Button';
-import { Download, Plus, Trash2, Printer } from 'lucide-react';
+import { Download, Plus, Trash2, Printer, Loader2, X } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -23,6 +23,8 @@ export const CreateInvoice: React.FC = () => {
   
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [note, setNote] = useState('Thank you for choosing us!');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -93,6 +95,25 @@ export const CreateInvoice: React.FC = () => {
     } catch (e) {
       console.error("Failed to save invoice", e);
       alert("Failed to save invoice");
+    }
+  };
+
+  const handleDeleteInvoice = async () => {
+    if (!id) return;
+    setIsDeleting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/invoices/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to delete invoice');
+      navigate(RoutePath.INVOICES);
+    } catch (e) {
+      console.error("Failed to delete invoice:", e);
+      alert("Failed to delete invoice");
+      setIsDeleting(false);
+      setIsDeleteModalOpen(false);
     }
   };
 
@@ -277,7 +298,17 @@ export const CreateInvoice: React.FC = () => {
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Create Invoice</h1>
           <p className="text-slate-500 mt-2">Generate a professional invoice matching your template.</p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-3">
+          {id && (
+            <Button 
+              variant="outline" 
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 active:scale-95 transition-all"
+            >
+              <Trash2 size={16} />
+              Delete
+            </Button>
+          )}
           <Button variant="outline" className="flex items-center gap-2 border-slate-300 hover:border-indigo-600 hover:text-indigo-600 active:scale-95 transition-all" onClick={handlePrint}>
             <Printer size={18} />
             Print
@@ -461,6 +492,61 @@ export const CreateInvoice: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Delete Invoice Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md space-y-4 rounded-3xl border border-white/80 bg-white/95 backdrop-blur-2xl p-6 md:p-7 shadow-2xl overflow-hidden">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-red-600 border border-red-100">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Delete invoice?</h3>
+                  <p className="text-xs text-slate-500">This action cannot be undone.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 rounded-xl p-3 border border-slate-100">
+              Are you sure you want to permanently delete invoice <strong className="text-slate-900 font-semibold">#{invoiceNo}</strong>?
+            </p>
+            
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button 
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="rounded-full border border-slate-200 bg-white px-5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-all outline-none"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteInvoice}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-red-500/20 hover:bg-red-700 active:scale-95 transition-all outline-none disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete invoice'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

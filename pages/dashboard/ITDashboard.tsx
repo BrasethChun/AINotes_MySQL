@@ -75,7 +75,7 @@ export const ITDashboard: React.FC = () => {
   const itTabs = [
     { id: 'executive', label: 'Executive Summary', icon: BarChart3 },
     { id: 'subscriptions', label: 'Cloud & HIS Subscriptions', icon: Cloud },
-    { id: 'assets', label: 'Assets Inventory', icon: Monitor },
+    { id: 'assets', label: 'Assets Management', icon: Monitor },
     { id: 'helpdesk', label: 'Helpdesk Tickets', icon: Wrench },
     { id: 'staffing', label: 'Staffing & Shifts', icon: Users },
   ];

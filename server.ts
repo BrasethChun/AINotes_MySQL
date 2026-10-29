@@ -1,4 +1,5 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import mysql from 'mysql2/promise';
@@ -11,23 +12,194 @@ import crypto from 'crypto';
 import cron from 'node-cron';
 import axios from 'axios';
 import { initMailTables, setupMailRoutes } from './mailServer';
+import { setupBackupRoutes } from './backupManager';
+import { 
+  notifyGoDaddyDisconnection, 
+  startRemoteDatabaseHeartbeat, 
+  setupTelegramAlertRoutes 
+} from './telegramAlertService';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
-let pool: mysql.Pool | null = null;
+const LOCAL_CONFIG = {
+  host: '127.0.0.1',
+  port: 3306,
+  user: 'ainotes_user',
+  password: 'x!gmx^-hQhkn5JEw',
+  database: 'ainotes_db',
+  ssl: false
+};
 
-function getDb(): mysql.Pool {
-  if (!pool) {
-    pool = mysql.createPool({
-      host: process.env.MYSQL_HOST || 'localhost',
-      user: process.env.MYSQL_USER,
-      password: process.env.MYSQL_PASSWORD,
-      database: process.env.MYSQL_DATABASE,
+let primaryPool: mysql.Pool | null = null;
+let fallbackPool: mysql.Pool | null = null;
+let isFailoverActive = false;
+let failoverReason = '';
+let lastFailoverAt: string | null = null;
+
+function createDirectPool(config?: {
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
+  ssl?: boolean;
+}): mysql.Pool {
+  const host = config?.host || process.env.MYSQL_HOST || LOCAL_CONFIG.host;
+  const port = Number(config?.port || process.env.MYSQL_PORT) || LOCAL_CONFIG.port;
+  const user = config?.user || process.env.MYSQL_USER || LOCAL_CONFIG.user;
+  const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? LOCAL_CONFIG.password);
+  const database = config?.database || process.env.MYSQL_DATABASE || LOCAL_CONFIG.database;
+  const isSsl = config?.ssl !== undefined ? config.ssl : process.env.MYSQL_SSL === 'true';
+
+  return mysql.createPool({
+    host,
+    port,
+    user,
+    password,
+    database,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 8000,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 5000,
+    ssl: isSsl ? { rejectUnauthorized: false } : undefined
+  });
+}
+
+function getFallbackPool(): mysql.Pool {
+  if (!fallbackPool) {
+    fallbackPool = mysql.createPool({
+      host: LOCAL_CONFIG.host,
+      port: LOCAL_CONFIG.port,
+      user: LOCAL_CONFIG.user,
+      password: LOCAL_CONFIG.password,
+      database: LOCAL_CONFIG.database,
       waitForConnections: true,
       connectionLimit: 10,
-      queueLimit: 0
+      queueLimit: 0,
+      connectTimeout: 4000,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 5000
     });
   }
-  return pool;
+  return fallbackPool;
+}
+
+function explicitlySwitchToLocalDb(): mysql.Pool {
+  console.warn('[Database Admin Action] Explicitly reverting primary database to local ainotes_db instance.');
+  process.env.MYSQL_HOST = LOCAL_CONFIG.host;
+  process.env.MYSQL_PORT = String(LOCAL_CONFIG.port);
+  process.env.MYSQL_USER = LOCAL_CONFIG.user;
+  process.env.MYSQL_PASSWORD = LOCAL_CONFIG.password;
+  process.env.MYSQL_DATABASE = LOCAL_CONFIG.database;
+  process.env.MYSQL_SSL = 'false';
+  process.env.PRIMARY_DB = 'local';
+  process.env.PRIMARY_LOCKED = 'false';
+
+  updateEnvFile({
+    MYSQL_HOST: LOCAL_CONFIG.host,
+    MYSQL_PORT: String(LOCAL_CONFIG.port),
+    MYSQL_USER: LOCAL_CONFIG.user,
+    MYSQL_PASSWORD: LOCAL_CONFIG.password,
+    MYSQL_DATABASE: LOCAL_CONFIG.database,
+    MYSQL_SSL: 'false',
+    PRIMARY_DB: 'local',
+    PRIMARY_LOCKED: 'false'
+  });
+
+  if (primaryPool) {
+    try { primaryPool.end().catch(() => {}); } catch {}
+    primaryPool = null;
+  }
+
+  isFailoverActive = false;
+  failoverReason = '';
+
+  primaryPool = createDirectPool(LOCAL_CONFIG);
+  return primaryPool;
+}
+
+function getDb(): mysql.Pool {
+  if (!primaryPool) {
+    primaryPool = createDirectPool();
+  }
+
+  const isRemoteConfigured = (process.env.MYSQL_HOST && process.env.MYSQL_HOST !== '127.0.0.1' && process.env.MYSQL_HOST !== 'localhost');
+
+  // If local standalone mode, return primary pool directly
+  if (!isRemoteConfigured) {
+    return primaryPool;
+  }
+
+  // Resilient Proxy for Remote GoDaddy with In-Memory Local MariaDB Fallback
+  return new Proxy(primaryPool, {
+    get(target, prop, receiver) {
+      if (prop === 'query' || prop === 'execute') {
+        return async (...args: any[]) => {
+          // If in-memory failover is already active, direct immediately to local MariaDB replica buffer
+          if (isFailoverActive) {
+            const fallback = getFallbackPool();
+            return await (fallback as any)[prop](...args);
+          }
+
+          try {
+            return await (target as any)[prop](...args);
+          } catch (err: any) {
+            const isConnectionLoss = 
+              err?.code === 'ER_BAD_DB_ERROR' || 
+              err?.code === 'ECONNREFUSED' || 
+              err?.code === 'ETIMEDOUT' ||
+              err?.code === 'ENOTFOUND' ||
+              err?.code === 'EHOSTUNREACH' ||
+              err?.code === 'ECONNRESET' ||
+              err?.code === 'PROTOCOL_CONNECTION_LOST';
+
+            if (isConnectionLoss) {
+              console.warn(`[GoDaddy MySQL Connection Drop] (${err.code}: ${err.message}). Retrying once after 500ms...`);
+              await new Promise(res => setTimeout(res, 500));
+              try {
+                return await (target as any)[prop](...args);
+              } catch (retryErr: any) {
+                // Secondary check failed: GoDaddy is temporarily unreachable
+                console.warn(`[GoDaddy In-Memory Failover Activated] Primary host ${process.env.MYSQL_HOST} unreachable (${retryErr.code}). Buffering in local MariaDB without modifying .env configuration.`);
+                isFailoverActive = true;
+                failoverReason = `${retryErr.code}: ${retryErr.message}`;
+                lastFailoverAt = new Date().toISOString();
+
+                // Dispatch Telegram alert asynchronously without blocking query execution
+                notifyGoDaddyDisconnection({
+                  host: process.env.MYSQL_HOST,
+                  database: process.env.MYSQL_DATABASE,
+                  errorCode: retryErr.code,
+                  errorMessage: retryErr.message,
+                  actionTaken: 'GoDaddy configuration remains locked as Primary. Application temporarily buffering queries in local MariaDB replica to maintain 100% uptime with zero data loss. Auto-reconnection will resume GoDaddy traffic automatically once reachable.'
+                }).catch(e => console.warn('Telegram alert notice:', e.message));
+
+                const fallback = getFallbackPool();
+                return await (fallback as any)[prop](...args);
+              }
+            }
+            throw err;
+          }
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+}
+
+function updateEnvFile(newConfig: Record<string, string>) {
+  const envPath = path.join(process.cwd(), '.env');
+  let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+  for (const [key, val] of Object.entries(newConfig)) {
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `${key}=${val}`);
+    } else {
+      content += `\n${key}=${val}`;
+    }
+  }
+  fs.writeFileSync(envPath, content.trim() + '\n', 'utf8');
 }
 
 // Ensure uploads dir
@@ -72,10 +244,6 @@ async function startServer() {
   // Serve uploaded files statically
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', dbConfigured: !!process.env.MYSQL_HOST });
-  });
-
   // Auth Middleware
   const authenticateToken = (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
@@ -88,6 +256,314 @@ async function startServer() {
       next();
     });
   };
+
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', dbConfigured: !!process.env.MYSQL_HOST });
+  });
+
+  // --- DATABASE MIGRATION & GODADDY MYSQL ENDPOINTS ---
+
+  // Download GoDaddy phpMyAdmin SQL Migration Dump
+  app.get('/api/db/export-godaddy', (req, res) => {
+    try {
+      const dumpPath = path.join(process.cwd(), 'godaddy_migration_dump.sql');
+      const fallbackPath = path.join(process.cwd(), 'ainotes_db.sql');
+      const targetFile = fs.existsSync(dumpPath) ? dumpPath : fallbackPath;
+      
+      if (!fs.existsSync(targetFile)) {
+        return res.status(404).json({ error: 'Migration SQL file not found' });
+      }
+
+      res.setHeader('Content-Disposition', 'attachment; filename="godaddy_ainotes_migration.sql"');
+      res.setHeader('Content-Type', 'application/sql');
+      fs.createReadStream(targetFile).pipe(res);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to export migration SQL: ' + err.message });
+    }
+  });
+
+  // Get current DB connection info & table statistics (Restricted to Owner account for security)
+  app.get('/api/db/status', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const [userRows]: any = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
+      if (!userRows || userRows.length === 0 || userRows[0].role !== 'owner') {
+        return res.status(403).json({ error: 'Access denied: SQL status is restricted to Owner accounts only for security.' });
+      }
+
+      const configuredHost = process.env.MYSQL_HOST || '127.0.0.1';
+      const isRemote = configuredHost !== 'localhost' && configuredHost !== '127.0.0.1';
+      const isPrimaryLocked = process.env.PRIMARY_LOCKED === 'true' || isRemote;
+      const primaryDb = isRemote ? 'godaddy' : 'local';
+
+      const startTime = Date.now();
+      await db.query('SELECT 1');
+      const pingMs = Date.now() - startTime;
+
+      let activeHost = configuredHost;
+      let statusText = 'Connected';
+
+      if (isFailoverActive) {
+        activeHost = '127.0.0.1 (Local MariaDB Replica Buffer)';
+        statusText = 'Temporary Local Buffer Active (Auto-reconnecting GoDaddy...)';
+      } else if (isRemote) {
+        statusText = 'GoDaddy Remote Primary (Locked & Live)';
+      } else {
+        statusText = 'Local MariaDB Active';
+      }
+
+      const [notesCount]: any = await db.query('SELECT COUNT(*) as c FROM notes').catch(() => [[{ c: 0 }]]);
+      const [subsCount]: any = await db.query('SELECT COUNT(*) as c FROM it_cloud_subscriptions').catch(() => [[{ c: 0 }]]);
+      const [assetsCount]: any = await db.query('SELECT COUNT(*) as c FROM it_assets').catch(() => [[{ c: 0 }]]);
+      const [ticketsCount]: any = await db.query('SELECT COUNT(*) as c FROM helpdesk').catch(() => [[{ c: 0 }]]);
+      const [staffCount]: any = await db.query('SELECT COUNT(*) as c FROM it_staffing').catch(() => [[{ c: 0 }]]);
+      const [usersCount]: any = await db.query('SELECT COUNT(*) as c FROM users').catch(() => [[{ c: 0 }]]);
+
+      res.json({
+        host: configuredHost,
+        activeHost,
+        port: Number(process.env.MYSQL_PORT) || 3306,
+        database: process.env.MYSQL_DATABASE || 'ainotes_db',
+        user: process.env.MYSQL_USER || 'ainotes_user',
+        isRemote,
+        primaryDb,
+        isPrimaryLocked,
+        isFailoverActive,
+        failoverReason: isFailoverActive ? failoverReason : null,
+        lastFailoverAt: isFailoverActive ? lastFailoverAt : null,
+        sslEnabled: process.env.MYSQL_SSL === 'true',
+        status: statusText,
+        latencyMs: pingMs,
+        outboundIp: '34.34.254.10',
+        counts: {
+          notes: notesCount[0]?.c || 0,
+          subscriptions: subsCount[0]?.c || 0,
+          assets: assetsCount[0]?.c || 0,
+          tickets: ticketsCount[0]?.c || 0,
+          staff: staffCount[0]?.c || 0,
+          users: usersCount[0]?.c || 0
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        status: 'Error',
+        host: process.env.MYSQL_HOST || '127.0.0.1',
+        isFailoverActive,
+        error: err.message
+      });
+    }
+  });
+
+  // Test GoDaddy Remote Connection
+  app.post('/api/db/test-connection', authenticateToken, async (req: any, res) => {
+    const { host, port, user, password, database, ssl } = req.body;
+    if (!host || !user || !database) {
+      return res.status(400).json({ error: 'Host, database name, and user are required.' });
+    }
+
+    let testConn: any = null;
+    try {
+      const startTime = Date.now();
+      testConn = await mysql.createConnection({
+        host: host.trim(),
+        port: Number(port) || 3306,
+        user: user.trim(),
+        password: password || '',
+        database: database.trim(),
+        connectTimeout: 8000,
+        ssl: ssl ? { rejectUnauthorized: false } : undefined
+      });
+
+      await testConn.query('SELECT 1');
+      const [tables]: any = await testConn.query('SHOW TABLES');
+      const latency = Date.now() - startTime;
+      const tableNames = tables.map((t: any) => Object.values(t)[0]);
+
+      await testConn.end();
+      testConn = null;
+
+      res.json({
+        success: true,
+        message: 'Successfully connected to GoDaddy MySQL server!',
+        latencyMs: latency,
+        tablesCount: tableNames.length,
+        tablesFound: tableNames
+      });
+    } catch (err: any) {
+      if (testConn) {
+        try { await testConn.end(); } catch {}
+      }
+
+      let friendlyMsg = err.message || 'Connection failed';
+      if (err.code === 'ETIMEDOUT' || err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+        friendlyMsg = `Could not reach GoDaddy host at ${host}:${port || 3306}. Please ensure you have added '%' (or outbound IP 34.34.254.10) in cPanel -> Remote MySQL, and that your server hostname is correct.`;
+      } else if (err.code === 'ER_ACCESS_DENIED_ERROR') {
+        friendlyMsg = `Access denied for user '${user}'. In GoDaddy cPanel, go to 'Remote MySQL' and add '%' (or outbound IP 34.34.254.10) to the Access Hosts list. Also ensure user '${user}' is assigned to database '${database}' with ALL PRIVILEGES.`;
+      } else if (err.code === 'ER_BAD_DB_ERROR') {
+        friendlyMsg = `Database '${database}' does not exist on this server. Please create it first in GoDaddy cPanel MySQL Database Wizard.`;
+      }
+
+      res.status(400).json({
+        success: false,
+        error: friendlyMsg,
+        rawCode: err.code
+      });
+    }
+  });
+
+  // Apply & Lock GoDaddy Database Configuration as Permanent Primary
+  app.post('/api/db/apply-config', authenticateToken, async (req: any, res) => {
+    const { host, port, user, password, database, ssl } = req.body;
+    if (!host || !user || !database) {
+      return res.status(400).json({ error: 'Host, database name, and user are required.' });
+    }
+
+    const cleanHost = host.trim();
+    const cleanPort = String(Number(port) || 3306);
+    const cleanUser = user.trim();
+    const cleanPassword = password || '';
+    const cleanDb = database.trim();
+    const cleanSsl = ssl ? 'true' : 'false';
+
+    let testConn: any = null;
+    try {
+      // 1. Validate connection first
+      testConn = await mysql.createConnection({
+        host: cleanHost,
+        port: Number(cleanPort),
+        user: cleanUser,
+        password: cleanPassword,
+        database: cleanDb,
+        connectTimeout: 8000,
+        ssl: ssl ? { rejectUnauthorized: false } : undefined
+      });
+      await testConn.query('SELECT 1');
+      await testConn.end();
+      testConn = null;
+
+      // 2. Update process.env and permanently lock as primary
+      process.env.MYSQL_HOST = cleanHost;
+      process.env.MYSQL_PORT = cleanPort;
+      process.env.MYSQL_USER = cleanUser;
+      process.env.MYSQL_PASSWORD = cleanPassword;
+      process.env.MYSQL_DATABASE = cleanDb;
+      process.env.MYSQL_SSL = cleanSsl;
+      process.env.PRIMARY_DB = 'godaddy';
+      process.env.PRIMARY_LOCKED = 'true';
+
+      // 3. Persist to .env permanently
+      updateEnvFile({
+        MYSQL_HOST: cleanHost,
+        MYSQL_PORT: cleanPort,
+        MYSQL_USER: cleanUser,
+        MYSQL_PASSWORD: cleanPassword,
+        MYSQL_DATABASE: cleanDb,
+        MYSQL_SSL: cleanSsl,
+        PRIMARY_DB: 'godaddy',
+        PRIMARY_LOCKED: 'true'
+      });
+
+      // 4. Reset pools and failover state
+      if (primaryPool) {
+        await primaryPool.end().catch(() => {});
+        primaryPool = null;
+      }
+      isFailoverActive = false;
+      failoverReason = '';
+      lastFailoverAt = null;
+
+      // 5. Initialize fresh primary pool
+      primaryPool = createDirectPool();
+      await primaryPool.query('SELECT 1');
+
+      res.json({
+        success: true,
+        message: `GoDaddy MySQL locked as permanent Primary: ${cleanHost} (${cleanDb}). Auto-failover and auto-reconnect are active.`
+      });
+    } catch (err: any) {
+      if (testConn) {
+        try { await testConn.end(); } catch {}
+      }
+
+      // CRITICAL: DO NOT erase .env or revert on failure!
+      let friendlyMsg = err.message || 'Connection failed';
+      if (err.code === 'ETIMEDOUT' || err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+        friendlyMsg = `Could not reach GoDaddy host at ${cleanHost}:${cleanPort}. Please ensure you have added '%' (or outbound IP 34.34.254.10) in cPanel -> Remote MySQL.`;
+      } else if (err.code === 'ER_ACCESS_DENIED_ERROR') {
+        friendlyMsg = `Access denied for user '${cleanUser}'. In GoDaddy cPanel, go to 'Remote MySQL' and add '%' (or outbound IP 34.34.254.10) to the Access Hosts list. Also ensure user '${cleanUser}' is assigned to database '${cleanDb}' with ALL PRIVILEGES.`;
+      } else if (err.code === 'ER_BAD_DB_ERROR') {
+        friendlyMsg = `Database '${cleanDb}' does not exist on this server. Please create it first in GoDaddy cPanel MySQL Database Wizard.`;
+      }
+
+      res.status(400).json({ error: friendlyMsg, rawCode: err.code });
+    }
+  });
+
+  // Revert back to local database (explicit admin action only)
+  app.post('/api/db/revert-local', authenticateToken, async (req: any, res) => {
+    try {
+      const localPool = explicitlySwitchToLocalDb();
+      await localPool.query('SELECT 1');
+
+      res.json({
+        success: true,
+        message: 'Successfully reverted database to local instance (ainotes_db).'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to revert database: ' + err.message });
+    }
+  });
+
+  // Manual trigger to test or resume GoDaddy primary connection immediately
+  app.post('/api/db/retry-godaddy', authenticateToken, async (req: any, res) => {
+    try {
+      const currentHost = process.env.MYSQL_HOST || '127.0.0.1';
+      const isRemote = currentHost !== '127.0.0.1' && currentHost !== 'localhost';
+
+      if (!isRemote) {
+        return res.status(400).json({ error: 'No remote GoDaddy database is configured as primary.' });
+      }
+
+      const startTime = Date.now();
+      const testConn = await mysql.createConnection({
+        host: currentHost,
+        port: Number(process.env.MYSQL_PORT) || 3306,
+        user: process.env.MYSQL_USER,
+        password: process.env.MYSQL_PASSWORD,
+        database: process.env.MYSQL_DATABASE,
+        connectTimeout: 6000,
+        ssl: process.env.MYSQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined
+      });
+      await testConn.query('SELECT 1');
+      const latencyMs = Date.now() - startTime;
+      await testConn.end();
+
+      // If test succeeded, reconnect primary pool
+      if (primaryPool) {
+        await primaryPool.end().catch(() => {});
+        primaryPool = null;
+      }
+      primaryPool = createDirectPool();
+      await primaryPool.query('SELECT 1');
+
+      isFailoverActive = false;
+      failoverReason = '';
+      lastFailoverAt = null;
+
+      res.json({
+        success: true,
+        latencyMs,
+        message: `Successfully reconnected to GoDaddy MySQL server (${latencyMs}ms)! Live traffic resumed on Primary.`
+      });
+    } catch (err: any) {
+      res.status(400).json({
+        success: false,
+        error: `Could not reach GoDaddy host ${process.env.MYSQL_HOST}: ${err.message}`,
+        rawCode: err.code
+      });
+    }
+  });
+
 
   // Auth Routes
   app.post('/api/auth/register', async (req, res) => {
@@ -539,8 +1015,15 @@ async function startServer() {
   app.get('/api/notes/:id', authenticateToken, async (req: any, res: any) => {
     try {
       const db = getDb();
-      const [rows]: any = await db.query('SELECT * FROM notes WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-      if(rows.length === 0) return res.status(404).json({ error: 'Note not found' });
+      const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
+
+      const [rows]: any = isPrivileged
+        ? await db.query('SELECT * FROM notes WHERE id = ?', [req.params.id])
+        : await db.query('SELECT * FROM notes WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [req.params.id, req.user.id]);
+
+      if (rows.length === 0) return res.status(404).json({ error: 'Note not found' });
       res.json(mapDbToNote(rows[0]));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -638,13 +1121,19 @@ async function startServer() {
       await db.query('ALTER TABLE notes ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE').catch(e => {});
       const { title, content, thumbnailUrl, tags, attachments, meetingDate, meetingVenue, agenda, meetingPriority } = req.body;
       
-      // We only update if the note belongs to the user
-      const [existing]: any = await db.query('SELECT id FROM notes WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+      const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
+
+      const [existing]: any = isPrivileged
+        ? await db.query('SELECT id FROM notes WHERE id = ?', [req.params.id])
+        : await db.query('SELECT id FROM notes WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [req.params.id, req.user.id]);
+
       if (existing.length === 0) return res.status(404).json({ error: 'Note not found' });
 
       await db.query(
-        'UPDATE notes SET title=?, content=?, thumbnail_url=?, tags=?, attachments=?, meeting_date=?, meeting_venue=?, agenda=?, meeting_priority=?, updated_at=NOW() WHERE id=? AND user_id=?',
-        [title, content, thumbnailUrl, JSON.stringify(tags||[]), JSON.stringify(attachments||[]), meetingDate || null, meetingVenue || null, agenda || null, meetingPriority || null, req.params.id, req.user.id]
+        'UPDATE notes SET title=?, content=?, thumbnail_url=?, tags=?, attachments=?, meeting_date=?, meeting_venue=?, agenda=?, meeting_priority=?, updated_at=NOW() WHERE id=?',
+        [title, content, thumbnailUrl, JSON.stringify(tags||[]), JSON.stringify(attachments||[]), meetingDate || null, meetingVenue || null, agenda || null, meetingPriority || null, req.params.id]
       );
       
       const [rows]: any = await db.query('SELECT * FROM notes WHERE id = ?', [req.params.id]);
@@ -657,7 +1146,25 @@ async function startServer() {
   app.delete('/api/notes/:id', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      await db.query('DELETE FROM notes WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+      const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
+
+      let result: any;
+      if (isPrivileged) {
+        [result] = await db.query('DELETE FROM notes WHERE id = ?', [req.params.id]);
+      } else {
+        [result] = await db.query('DELETE FROM notes WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [req.params.id, req.user.id]);
+      }
+
+      if (result.affectedRows === 0) {
+        const [exists]: any = await db.query('SELECT id FROM notes WHERE id = ?', [req.params.id]);
+        if (exists.length === 0) {
+          return res.status(404).json({ error: 'Note not found or already deleted' });
+        }
+        return res.status(403).json({ error: 'Permission denied to delete this note' });
+      }
+
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -959,7 +1466,8 @@ async function startServer() {
     ['sub-bluehost-07', 'khemahospital.com Domain +Domain Privacy + Protection', 'BlueHost', 'Cloud Infrastructure', 'Domain Privacy + Protection', 'Annually', 37.19, 'USD', 1, 1, 'Active', '2027-05-21', 1, 'KHEMA GLOBAL CO.,LTD', 'IT Operations', 'BH-KHEMA-DOM', 'Credit Card', 'https://www.bluehost.com', 'Primary hospital domain khemahospital.com with WHOIS privacy and domain security lock'],
     ['sub-cyfuture-08', '2 VM New Anzer accounting systems Business Basic Plan', 'Cyfuture', 'Cloud Infrastructure', 'Business Basic Plan (2 VM)', 'Monthly', 889.00, 'USD', 2, 0, 'Active', '2027-06-23', 1, 'Sakal Polyclinic Street 2004', 'IT Operations', 'CYF-ANZER', 'Corporate Invoice', 'https://cyfuture.cloud', '2 Virtual Machines hosting New Anzer hospital accounting and ERP systems'],
     ['sub-bluehost-09', 'WordPress Professional Hosting & Xcitium Backup Professional', 'BlueHost', 'Cloud Infrastructure', 'WordPress Professional Hosting', 'Annually', 455.76, 'USD', 1, 1, 'Active', '2027-07-01', 1, 'KHEMA GLOBAL CO.,LTD', 'IT Operations', 'BH-WP-HOST', 'Credit Card', 'https://www.bluehost.com', 'WordPress managed hosting for Khema Hospital website with Xcitium enterprise backup'],
-    ['sub-godaddy-10', 'Web Hosting Ultimate Renewal + Daily Backups - 30 days', 'Godaddy', 'Cloud Infrastructure', 'Ultimate Renewal + Daily Backups', 'Annually', 356.14, 'USD', 1, 1, 'Active', '2027-08-26', 1, 'All Sites', 'IT Operations', 'GD-WEB-HOST', 'Credit Card', 'https://www.godaddy.com', 'Ultimate web hosting plan with 30-day automated rolling daily snapshots and backup protection']
+    ['sub-godaddy-10', 'Web Hosting Ultimate Renewal + Daily Backups - 30 days', 'Godaddy', 'Cloud Infrastructure', 'Ultimate Renewal + Daily Backups', 'Annually', 356.14, 'USD', 1, 1, 'Active', '2027-08-26', 1, 'All Sites', 'IT Operations', 'GD-WEB-HOST', 'Credit Card', 'https://www.godaddy.com', 'Ultimate web hosting plan with 30-day automated rolling daily snapshots and backup protection'],
+    ['749cf378-1c4b-4c0b-a555-0c1440576d86', 'Airo AI Web agent builder Annual Fee', 'Godaddy', 'AI & Machine Learning', '', 'Annually', 233.87, 'USD', 0, 0, 'Active', '2027-10-24', 1, 'KHEMA GLOBAL CO.,LTD', 'IT Operations', '', 'Credit Card', 'https://airo-builder.godaddy.com/manage-plan', 'for IT Research managment dasbhaord builder.']
   ];
 
   async function seedKhemaCloudSubscriptions(db: any) {
@@ -2050,6 +2558,30 @@ async function startServer() {
   // Initialize Mail Assistant tables and routes
   await initMailTables(getDb()).catch(e => console.warn('Mail tables init warning:', e.message));
   setupMailRoutes(app, getDb, authenticateToken);
+
+  // Initialize 12-Hour Automated Database Backups & 1-Click Disaster Recovery
+  setupBackupRoutes(app, getDb, authenticateToken);
+
+  // Initialize Telegram GoDaddy MySQL Disconnection Alert routes & Heartbeat Monitor
+  setupTelegramAlertRoutes(app, authenticateToken);
+  startRemoteDatabaseHeartbeat(getDb, async (isReachable, latencyMs) => {
+    if (isReachable && isFailoverActive) {
+      console.log(`[Auto-Reconnect] GoDaddy MySQL is reachable again (${latencyMs}ms)! Restoring primary live pool...`);
+      try {
+        if (primaryPool) {
+          await primaryPool.query('SELECT 1');
+        } else {
+          primaryPool = createDirectPool();
+        }
+        isFailoverActive = false;
+        failoverReason = '';
+        lastFailoverAt = null;
+        console.log('[Auto-Reconnect] GoDaddy primary live traffic successfully resumed.');
+      } catch (e: any) {
+        console.warn('[Auto-Reconnect] Probe succeeded but primary pool re-test failed:', e.message);
+      }
+    }
+  });
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

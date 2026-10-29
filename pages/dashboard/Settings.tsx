@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { 
   User, Shield, AlertCircle, CheckCircle2, Save, MapPin, Layers, 
   Settings as SettingsIcon, Edit, Trash2, Power, PowerOff, Plus, X, 
-  Search, Lock, Mail, Key, Eye, EyeOff, Copy, Check, RefreshCw 
+  Search, Lock, Mail, Key, Eye, EyeOff, Copy, Check, RefreshCw, Database 
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SettingsModule } from './SettingsModule';
+import { DatabaseMigrationModule } from './DatabaseMigrationModule';
 import { useAuth } from '../../context/AuthContext';
+import { useSearchParams } from 'react-router-dom';
 
 interface UserData {
   id: string;
@@ -22,7 +24,9 @@ interface UserData {
 
 export const Settings: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'sites' | 'categories' | 'users'>('sites');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = (searchParams.get('tab') as 'sites' | 'categories' | 'users' | 'database') || 'sites';
+  const [activeTab, setActiveTab] = useState<'sites' | 'categories' | 'users' | 'database'>(initialTab);
   const [users, setUsers] = useState<UserData[]>([]);
   const [originalUsers, setOriginalUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -437,7 +441,7 @@ export const Settings: React.FC = () => {
       {/* Settings Navigation Tabs */}
       <div className="flex border-b border-slate-200 mb-6 gap-2">
         <button
-          onClick={() => setActiveTab('sites')}
+          onClick={() => { setActiveTab('sites'); setSearchParams({ tab: 'sites' }); }}
           className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
             activeTab === 'sites'
               ? 'border-indigo-600 text-indigo-600 font-semibold'
@@ -448,7 +452,7 @@ export const Settings: React.FC = () => {
           Sites & Facilities
         </button>
         <button
-          onClick={() => setActiveTab('categories')}
+          onClick={() => { setActiveTab('categories'); setSearchParams({ tab: 'categories' }); }}
           className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
             activeTab === 'categories'
               ? 'border-indigo-600 text-indigo-600 font-semibold'
@@ -459,7 +463,7 @@ export const Settings: React.FC = () => {
           Asset Categories
         </button>
         <button
-          onClick={() => setActiveTab('users')}
+          onClick={() => { setActiveTab('users'); setSearchParams({ tab: 'users' }); }}
           className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
             activeTab === 'users'
               ? 'border-indigo-600 text-indigo-600 font-semibold'
@@ -468,6 +472,17 @@ export const Settings: React.FC = () => {
         >
           <Shield className="w-4 h-4" />
           User Roles & Access
+        </button>
+        <button
+          onClick={() => { setActiveTab('database'); setSearchParams({ tab: 'database' }); }}
+          className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
+            activeTab === 'database'
+              ? 'border-indigo-600 text-indigo-600 font-semibold'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Database className="w-4 h-4 text-emerald-600" />
+          GoDaddy MySQL Migration
         </button>
       </div>
 
@@ -700,6 +715,11 @@ export const Settings: React.FC = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* GoDaddy MySQL Database Migration Tab */}
+      {activeTab === 'database' && (
+        <DatabaseMigrationModule />
       )}
 
       {/* Edit User Modal */}

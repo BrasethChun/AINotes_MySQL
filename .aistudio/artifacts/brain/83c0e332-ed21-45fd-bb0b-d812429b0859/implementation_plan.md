@@ -1,68 +1,93 @@
-# Implementation Plan: Full Email Content Synchronization (HTML & Text) for Bluehost Mail
+# GoDaddy MySQL Primary Database Persistence & Auto-Reconnection
 
-Upgrade the **Mail Assistant** to synchronize and display complete email content—both **Rich HTML** and **Plain Text**—from the **Bluehost** mail provider, backfilling existing messages and rendering formatted email bodies with interactive views in the reading pane.
+Lock GoDaddy MySQL as the permanent primary database across server reboots, eliminating unintended resets to local storage while providing resilient auto-retries, in-memory failover, and automated reconnection upon network recovery.
 
----
+### User Review & Critical Decisions
 
-## User Review & Clarified Requirements
-
-> [!NOTE]
-> All clarified requirements implemented:
-> - **Display Mode**: **Rich HTML with formatting and plain text fallback** (Completed).
-> - **Backfill Strategy**: **Re-sync and update all existing emails** (Completed).
-> - **Sync Depth**: **Last 30 messages per folder** (Completed).
+> [!IMPORTANT]
+> The following architectural decisions were confirmed in Phase 1:
+> - **Connection Drop Strategy**: Auto-retry GoDaddy with temporary in-memory fallback and automated background reconnection. The system will **never** permanently overwrite `.env` or delete GoDaddy connection parameters during transient outages.
+> - **Configuration Persistence**: GoDaddy MySQL will remain locked as the permanent primary database across container restarts and reboots.
+> - **Telegram Notifications**: Real-time alerts will notify administrators via `kipchelpdesk_bot` when remote connectivity drops and when connection is successfully restored.
 
 ---
 
-## 1. Architecture & Data Flow
+### 1. Overview & Core Concept
+
+Currently, when any database query to GoDaddy MySQL times out or drops an idle connection (`ETIMEDOUT`, `PROTOCOL_CONNECTION_LOST`), the database proxy executes `resetToLocalDb()`, which permanently rewrites `.env` to `127.0.0.1` and clears the remote host settings. This forces systems administrators to manually re-enter their GoDaddy configuration.
+
+This upgrade transforms the connection architecture into an **Enterprise Dual-Tier Database Engine**:
+1. **Locked Primary Tier (GoDaddy Remote MySQL)**: The authoritative configuration in `.env` stays locked to GoDaddy.
+2. **Transient Failover Tier (Local MariaDB Replica)**: If a GoDaddy network glitch occurs, the system temporarily services the query from the local replica to prevent user downtime, while keeping GoDaddy locked as primary.
+3. **Automated Health Prober & Reconnection Worker**: Pings GoDaddy every 30 seconds. As soon as GoDaddy is reachable, queries immediately route back to GoDaddy and a recovery notice is dispatched to Telegram.
+
+---
+
+### 2. User Experience & Visual Design
+
+#### A. Database Center Status View (`DatabaseMigrationModule.tsx`)
+- **Primary Database Lock Badge**: A clear indicator showing `Primary Database: GoDaddy Remote (Locked)` with a lock icon.
+- **Failover & Reconnection Pill**: Displays real-time state:
+  - `🟢 Connected to GoDaddy MySQL (Primary Active)`
+  - `🟡 GoDaddy Temporary Hiccup (Auto-Retrying · Local Replica Buffering)`
+- **One-Click Manual Controls**:
+  - `Lock as Permanent Primary`: Persists GoDaddy credentials in `.env` and `backup_config.json`.
+  - `Revert Primary to Local MariaDB`: Explicit admin-initiated switch without accidental resets.
+  - `Test Connection & Ping`: Live diagnostic button verifying latency and table schemas.
+
+#### B. Visual Hierarchy & Theme Compliance
+- Strict adherence to the SaaS & Dashboard guidelines: clean 1px border lines, unboxed metadata text with `·` separators, and tabular numeric values (`tabular-nums`) for latency and timestamps.
+- Zero decorative pulsing dots on static text; status indicators reserved solely for active connection state.
+
+---
+
+### 3. Key Product Decisions & Trade-Offs
+
+#### Decision 1: In-Memory Transient Failover vs. Permanent Configuration Reset
+- **Chosen Approach**: In-memory transient fallback. When a query to GoDaddy fails, the system logs the incident, sends a Telegram alert, and routes the single query or active session to the local replica **without altering the `.env` file**.
+- **Why**: Prevents permanent configuration loss caused by routine 30-second GoDaddy idle timeouts or Cloud Run network blips.
+- **Alternatives Considered**: Complete process termination or immediate 500 error (rejected because it breaks active user sessions).
+
+#### Decision 2: Connection Pool Keep-Alive Tuning for GoDaddy cPanel
+- **Chosen Approach**: Configure `mysql2` with aggressive TCP keep-alive (`enableKeepAlive: true`, `keepAliveInitialDelay: 5000`), connection validation before borrow, and automatic reconnect on `PROTOCOL_CONNECTION_LOST`.
+- **Why**: GoDaddy cPanel MySQL has aggressive idle timeouts that drop socket connections every 60 seconds. Client-side keep-alive packets prevent socket closure.
+
+---
+
+### 4. Technical Architecture & Data Strategy
 
 ```
-[Bluehost IMAP Server (SSL: 993)]
-         │
-         │  1. client.fetch(`${fetchFrom}:*`, { envelope, flags, uid, source: true })
-         ▼
-[IMAP Worker & mailparser Engine]
-         │
-         │  2. simpleParser(msg.source) extracts:
-         │     - full body_html (sanitized HTML styling)
-         │     - clean body_text (plain text fallback)
-         │     - rich snippet (first 160 clean characters)
-         ▼
-[MariaDB: mail_messages table]
-         │
-         │  3. INSERT / UPDATE ON DUPLICATE KEY:
-         │     - Updates existing records where body_text was placeholder
-         │     - Stores body_html LONGTEXT and body_text LONGTEXT
-         ▼
-[REST API: GET /api/mail/messages & GET /api/mail/messages/:id]
-         │
-         │  4. Serves full message payload to frontend
-         ▼
-[Mail Assistant 3-Column Client]
-         │
-         │  5. Reading Pane renders:
-         │     - Formatted HTML container with email-body-view
-         │     - HTML / Text toggle tabs
-         │     - AI Smart Reply & Summarizer grounded on complete email content
+┌─────────────────────────────────────────────────────────────┐
+│                       Express Backend                       │
+│                                                             │
+│   Incoming Request  ──►  Resilient DB Proxy (getDb)         │
+│                                    │                        │
+│                 ┌──────────────────┴──────────────────┐     │
+│                 ▼                                     ▼     │
+│       [Primary: GoDaddy MySQL]             [Failover Replica]│
+│       Host: *.secureserver.net             Host: 127.0.0.1  │
+│       Database: khema_ainotes              Database: local  │
+│                 │                                     │     │
+│                 ▼ (If transient drop)                 │     │
+│       Trigger Telegram Alert                          │     │
+│       Keep .env locked to GoDaddy                     │     │
+│       Temporary in-memory buffer ─────────────────────┘     │
+│                 ▲                                           │
+│                 │                                           │
+│       Background Health Prober (every 30s)                  │
+│       Auto-reconnects when GoDaddy responds                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 2. Completed Changes
-
-- [x] **Dependencies (`package.json`)**: Installed `mailparser` and dev dependency `@types/mailparser`.
-- [x] **Database Migration (`mailServer.ts`)**: Added `body_html LONGTEXT NULL` column and backfilled existing seeded records with formatted HTML.
-- [x] **IMAP Sync Pipeline (`mailServer.ts`)**:
-  - Configured 30-message fetch window (`fetchFrom = Math.max(1, mailbox.messages - 30)`).
-  - Fetched complete RFC822 `source: true`.
-  - Parsed with `simpleParser(msg.source)` into `body_text` and `body_html`.
-  - Implemented backfill update query when message IDs exist to replace placeholders with full content.
-  - Added HTML formatting to `POST /api/mail/send`.
-- [x] **Frontend Reading Pane (`MailAssistant.tsx`)**:
-  - Added interactive view toggle tabs: **"Formatted (HTML)"** and **"Plain Text"**.
-  - Styled sanitized HTML email viewer with clean padding and horizontal overflow handling.
-  - Replaced alerts with toast notifications.
-- [x] **Testing & Verification**:
-  - Tested RFC822 MIME parser successfully.
-  - Verified `body_text` and `body_html` in `GET /api/mail/messages`.
-  - Clean `compile_applet` build passed. Dev server active on port 3000.
+#### Component & File Updates
+1. `server.ts`:
+   - Refactor `getDb()` to eliminate destructive `resetToLocalDb()` on `.env`.
+   - Implement `isGoDaddyPrimaryLocked: boolean` flag loaded from `.env` (`PRIMARY_DB=godaddy`).
+   - Add query auto-retry with exponential backoff before transient failover.
+   - Configure connection pool keep-alive (`enableKeepAlive: true`, `keepAliveInitialDelay: 5000`, `maxIdle: 5`).
+2. `start-db.sh`:
+   - Preserve remote GoDaddy configuration in `.env` across container reboots, ensuring it is never overwritten by local setup scripts.
+3. `telegramAlertService.ts`:
+   - Align alert dispatch so it clarifies: *"GoDaddy temporary hiccup detected. System serving from replica while actively auto-reconnecting. Configuration remains locked."*
+4. `pages/dashboard/DatabaseMigrationModule.tsx`:
+   - Update UI status cards to display Permanent Primary status, active failover posture, and real-time reconnection telemetry.

@@ -9,6 +9,7 @@ import { RoutePath, NoteAttachment } from '../../types';
 import { StorageImage } from '../../components/ui/StorageImage';
 import { GoogleGenAI } from '@google/genai';
 import { useAuth } from '../../context/AuthContext';
+import { getDefaultCoverForNote, SAMPLE_IT_COVERS } from '../../src/utils/sampleCovers';
 
 export const CreateNote: React.FC = () => {
   const navigate = useNavigate();
@@ -81,6 +82,7 @@ export const CreateNote: React.FC = () => {
   
   // Image preview can be a Blob URL (new) or Storage Path (existing)
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [showSampleCoverModal, setShowSampleCoverModal] = useState(false);
   
   // Attachments: Mixed list of new Files and existing NoteAttachments
   const [newAttachments, setNewAttachments] = useState<File[]>([]);
@@ -215,7 +217,8 @@ export const CreateNote: React.FC = () => {
         );
       } 
       else if (!imagePreview) {
-        finalThumbnailUrl = undefined;
+        // Auto default sample cover image for IT Notes & Meetings if user doesn't add a cover
+        finalThumbnailUrl = getDefaultCoverForNote({ title, content, meetingDate });
       }
 
       const uploadedAttachments: NoteAttachment[] = [];
@@ -467,13 +470,22 @@ export const CreateNote: React.FC = () => {
                 className="h-full w-full object-cover" 
               />
               <div className="absolute top-4 right-4 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
+                  <button 
+                      type="button"
+                      onClick={() => setShowSampleCoverModal(true)}
+                      className="rounded-lg bg-white/90 px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-md backdrop-blur-md border border-indigo-200 hover:bg-white transition-colors flex items-center gap-1.5"
+                  >
+                      <Sparkles size={13} className="text-indigo-600" />
+                      <span>Sample Covers</span>
+                  </button>
                   <label className="cursor-pointer rounded-lg bg-white/90 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md backdrop-blur-md border border-slate-200 hover:bg-white transition-colors">
-                      Change
+                      Upload
                       <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
                   </label>
                   <button 
                       onClick={handleRemoveCover}
                       className="rounded-lg bg-white/90 p-1.5 text-slate-700 shadow-md backdrop-blur-md border border-slate-200 hover:text-red-600 transition-colors"
+                      title="Remove cover"
                   >
                       <X size={16} />
                   </button>
@@ -514,10 +526,19 @@ export const CreateNote: React.FC = () => {
                       <span>Attach File</span>
                       <input type="file" multiple className="hidden" onChange={handleAttachmentUpload} />
                    </label>
+                   <button
+                      type="button"
+                      onClick={() => setShowSampleCoverModal(true)}
+                      className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50/70 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-all hover:bg-indigo-100 hover:text-indigo-800 hover:shadow-sm"
+                      title="Browse curated IT & Meeting sample covers"
+                   >
+                      <Sparkles size={14} className="text-indigo-600" />
+                      <span>Sample Covers</span>
+                   </button>
                    {!imagePreview && (
                       <label className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-white hover:text-slate-800 hover:border-slate-300 hover:shadow-sm">
                          <ImageIcon size={14} className="text-slate-400 group-hover:text-slate-600" />
-                         <span>Add Cover</span>
+                         <span>Upload Cover</span>
                          <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
                       </label>
                    )}
@@ -611,10 +632,104 @@ export const CreateNote: React.FC = () => {
 
         <div className="border-t border-slate-100 bg-slate-50 px-8 py-3 text-center">
             <p className="text-xs text-slate-400">
-               Your note will be saved securely.
+               {!imagePreview ? "An auto default sample cover for IT Notes & Meetings will be applied if no cover is selected." : "Cover image will be saved with this note."}
             </p>
         </div>
       </div>
+
+      {/* Sample Covers Gallery Modal */}
+      {showSampleCoverModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="flex justify-between items-center px-6 py-5 border-b border-slate-100 bg-slate-50/70">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">Sample IT & Meeting Covers</h3>
+                  <p className="text-xs text-slate-500">Pick a curated cover image or leave blank for automatic selection</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowSampleCoverModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {SAMPLE_IT_COVERS.map((cover) => {
+                const isSelected = imagePreview === cover.url;
+                return (
+                  <div
+                    key={cover.id}
+                    onClick={() => {
+                      setImagePreview(cover.url);
+                      setShowSampleCoverModal(false);
+                    }}
+                    className={`group cursor-pointer rounded-2xl border overflow-hidden transition-all duration-200 flex flex-col hover:-translate-y-1 hover:shadow-lg ${
+                      isSelected
+                        ? 'border-indigo-600 ring-2 ring-indigo-500/30 shadow-md'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="relative h-28 w-full overflow-hidden bg-slate-100">
+                      <img
+                        src={cover.url}
+                        alt={cover.title}
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                      <div className="absolute top-2 left-2 z-10">
+                        <span className="rounded bg-slate-900/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                          {cover.badge}
+                        </span>
+                      </div>
+                      {isSelected && (
+                        <div className="absolute inset-0 bg-indigo-600/20 backdrop-blur-[1px] flex items-center justify-center z-10">
+                          <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow">
+                            Active
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-3 bg-white flex-1 flex flex-col justify-between">
+                      <h4 className="text-xs font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+                        {cover.title}
+                      </h4>
+                      <p className="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                        {cover.description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  setImagePreview(null);
+                  setShowSampleCoverModal(false);
+                }}
+                className="text-xs text-slate-500 hover:text-slate-800 font-medium"
+              >
+                Reset to Auto Default
+              </button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowSampleCoverModal(false)}
+                className="text-xs"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

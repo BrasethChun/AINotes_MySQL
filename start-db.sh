@@ -51,12 +51,19 @@ if ! mariadb-admin --protocol=socket -u root ping --silent >/dev/null 2>&1; then
 fi
 
 # 5. Ensure databases exist
-$ADMIN_CLI -e "CREATE DATABASE IF NOT EXISTS \`ainotes\`; CREATE DATABASE IF NOT EXISTS \`ainotes_db\`;"
+$ADMIN_CLI -e "CREATE DATABASE IF NOT EXISTS \`ainotes\`; CREATE DATABASE IF NOT EXISTS \`ainotes_db\`; CREATE DATABASE IF NOT EXISTS \`khema_ainotes\`; CREATE DATABASE IF NOT EXISTS \`khema_dbuser\`;"
+if [ -n "$MYSQL_DATABASE" ] && [ "$MYSQL_DATABASE" != "ainotes" ] && [ "$MYSQL_DATABASE" != "ainotes_db" ] && [ "$MYSQL_DATABASE" != "khema_ainotes" ] && [ "$MYSQL_DATABASE" != "khema_dbuser" ]; then
+  $ADMIN_CLI -e "CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\`;" 2>/dev/null || true
+fi
 
 # 6. Configure root and application user access
 $ADMIN_CLI -e "
   CREATE USER IF NOT EXISTS 'root'@'127.0.0.1';
+  SET PASSWORD FOR 'root'@'127.0.0.1' = PASSWORD('');
   GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+  CREATE USER IF NOT EXISTS 'root'@'localhost';
+  SET PASSWORD FOR 'root'@'localhost' = PASSWORD('');
+  GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
 
   CREATE USER IF NOT EXISTS 'ainotes_user'@'localhost' IDENTIFIED BY 'x!gmx^-hQhkn5JEw';
   CREATE USER IF NOT EXISTS 'ainotes_user'@'127.0.0.1' IDENTIFIED BY 'x!gmx^-hQhkn5JEw';
@@ -67,11 +74,18 @@ $ADMIN_CLI -e "
   GRANT ALL PRIVILEGES ON *.* TO 'ainotes_user'@'localhost' WITH GRANT OPTION;
   GRANT ALL PRIVILEGES ON *.* TO 'ainotes_user'@'127.0.0.1' WITH GRANT OPTION;
   GRANT ALL PRIVILEGES ON *.* TO 'ainotes_user'@'%' WITH GRANT OPTION;
+
+  CREATE USER IF NOT EXISTS 'khema_dbuser'@'localhost' IDENTIFIED BY 'Y+k,C=JAEA4nR+0*';
+  CREATE USER IF NOT EXISTS 'khema_dbuser'@'127.0.0.1' IDENTIFIED BY 'Y+k,C=JAEA4nR+0*';
+  CREATE USER IF NOT EXISTS 'khema_dbuser'@'%' IDENTIFIED BY 'Y+k,C=JAEA4nR+0*';
+  GRANT ALL PRIVILEGES ON *.* TO 'khema_dbuser'@'localhost' WITH GRANT OPTION;
+  GRANT ALL PRIVILEGES ON *.* TO 'khema_dbuser'@'127.0.0.1' WITH GRANT OPTION;
+  GRANT ALL PRIVILEGES ON *.* TO 'khema_dbuser'@'%' WITH GRANT OPTION;
   FLUSH PRIVILEGES;
 "
 
 # Also configure any custom user from env if provided
-if [ -n "$MYSQL_USER" ] && [ "$MYSQL_USER" != "root" ] && [ "$MYSQL_USER" != "ainotes_user" ]; then
+if [ -n "$MYSQL_USER" ] && [ "$MYSQL_USER" != "root" ] && [ "$MYSQL_USER" != "ainotes_user" ] && [ "$MYSQL_USER" != "khema_dbuser" ]; then
   PASS="${MYSQL_PASSWORD:-}"
   $ADMIN_CLI -e "
     CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${PASS}';
@@ -93,11 +107,13 @@ elif [ -f "./ainotes_db.sql" ]; then
 fi
 
 if [ -n "$SQL_FILE" ]; then
-  for TARGET_DB in "ainotes" "ainotes_db"; do
+  for TARGET_DB in "ainotes" "ainotes_db" "khema_ainotes" "khema_dbuser" "${MYSQL_DATABASE:-}"; do
+    if [ -z "$TARGET_DB" ]; then continue; fi
     TABLE_COUNT=$($ADMIN_CLI -D "$TARGET_DB" -N -s -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${TARGET_DB}';" 2>/dev/null || echo "0")
     USER_COUNT=$($ADMIN_CLI -D "$TARGET_DB" -N -s -e "SELECT COUNT(*) FROM users;" 2>/dev/null || echo "0")
-    if [ "$TABLE_COUNT" -eq 0 ] || [ "$USER_COUNT" -eq 0 ]; then
-      echo "Seeding and restoring ${TARGET_DB} database from $SQL_FILE..."
+    # Only seed and restore if database has 0 tables. Never drop existing data on reboot!
+    if [ "$TABLE_COUNT" -eq 0 ]; then
+      echo "Empty database detected. Seeding ${TARGET_DB} database from $SQL_FILE..."
       $ADMIN_CLI "$TARGET_DB" < "$SQL_FILE" || true
     fi
     $ADMIN_CLI -D "$TARGET_DB" -e "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Active';" 2>/dev/null || true

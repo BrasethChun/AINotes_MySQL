@@ -6,6 +6,7 @@ import { noteService } from '../../services/noteService';
 import { storageService } from '../../services/storageService';
 import { Note, RoutePath } from '../../types';
 import { StorageImage } from '../../components/ui/StorageImage';
+import { getDefaultCoverForNote, getCoverBadge } from '../../src/utils/sampleCovers';
 
 export const SingleNote: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -141,19 +142,24 @@ export const SingleNote: React.FC = () => {
 
         {/* Note Content */}
         {note && (
-        <article className="rounded-xl border border-zinc-200/60 bg-white shadow-subtle overflow-hidden">
-          {note.thumbnailUrl && (
-            <div className="h-64 w-full bg-zinc-50 border-b border-zinc-100">
+          <article className="rounded-xl border border-zinc-200/60 bg-white shadow-subtle overflow-hidden">
+            {/* Cover Header Banner */}
+            <div className="relative h-64 md:h-72 w-full bg-slate-900 border-b border-zinc-100 overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-slate-950/20 to-transparent z-10" />
               <StorageImage 
-                path={note.thumbnailUrl} 
+                path={getDefaultCoverForNote(note)} 
                 alt={note.title} 
                 className="h-full w-full object-cover" 
               />
+              <div className="absolute bottom-4 left-6 md:left-10 z-20">
+                <span className="rounded-md bg-slate-900/80 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white/95 shadow-md ring-1 ring-white/10">
+                  {getCoverBadge(getDefaultCoverForNote(note))}
+                </span>
+              </div>
             </div>
-          )}
-          
-          <div className="p-8 md:p-12">
-            <h1 className="mb-6 text-4xl font-bold tracking-tight text-zinc-900">{note.title || 'My notes'}</h1>
+            
+            <div className="p-8 md:p-12">
+              <h1 className="mb-6 text-4xl font-bold tracking-tight text-zinc-900">{note.title || 'My notes'}</h1>
             
             <div className="mb-8 flex flex-wrap gap-4 text-xs font-medium uppercase tracking-wider text-zinc-400 border-b border-zinc-100 pb-6">
               <span className="flex items-center"><Calendar size={14} className="mr-1.5 opacity-70" /> Created: {new Date(note.createdAt).toLocaleDateString()}</span>

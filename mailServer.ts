@@ -33,6 +33,9 @@ export async function initMailTables(db: mysql.Pool) {
       auto_sync_interval INT DEFAULT 15,
       last_synced_at DATETIME NULL,
       is_active TINYINT(1) DEFAULT 1,
+      compose_signature TEXT NULL,
+      reply_signature TEXT NULL,
+      include_reply_signature TINYINT(1) DEFAULT 1,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -47,6 +50,10 @@ export async function initMailTables(db: mysql.Pool) {
       from_address VARCHAR(255) NOT NULL,
       from_name VARCHAR(255) NOT NULL,
       to_address VARCHAR(255) NOT NULL,
+      cc_address TEXT NULL,
+      reply_to_id VARCHAR(36) NULL,
+      is_replied TINYINT(1) DEFAULT 0,
+      replied_at DATETIME NULL,
       subject TEXT,
       snippet TEXT,
       body_text LONGTEXT,
@@ -58,9 +65,53 @@ export async function initMailTables(db: mysql.Pool) {
     )
   `);
 
-  // Ensure body_html column exists in existing tables
+  // Ensure body_html and cc_address columns exist in existing tables
   try {
-    await db.query('ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS body_html LONGTEXT');
+    await db.query('ALTER TABLE mail_messages ADD COLUMN body_html LONGTEXT');
+  } catch (err: any) {
+    // Column might already exist
+  }
+
+  try {
+    await db.query('ALTER TABLE mail_messages ADD COLUMN cc_address TEXT');
+  } catch (err: any) {
+    // Column might already exist
+  }
+
+  // Ensure reply history tracking columns exist in mail_messages
+  try {
+    await db.query('ALTER TABLE mail_messages ADD COLUMN reply_to_id VARCHAR(36) NULL');
+  } catch (err: any) {
+    // Column might already exist
+  }
+
+  try {
+    await db.query('ALTER TABLE mail_messages ADD COLUMN is_replied TINYINT(1) DEFAULT 0');
+  } catch (err: any) {
+    // Column might already exist
+  }
+
+  try {
+    await db.query('ALTER TABLE mail_messages ADD COLUMN replied_at DATETIME NULL');
+  } catch (err: any) {
+    // Column might already exist
+  }
+
+  // Ensure signature columns exist in mail_accounts
+  try {
+    await db.query('ALTER TABLE mail_accounts ADD COLUMN compose_signature TEXT');
+  } catch (err: any) {
+    // Column might already exist
+  }
+
+  try {
+    await db.query('ALTER TABLE mail_accounts ADD COLUMN reply_signature TEXT');
+  } catch (err: any) {
+    // Column might already exist
+  }
+
+  try {
+    await db.query('ALTER TABLE mail_accounts ADD COLUMN include_reply_signature TINYINT(1) DEFAULT 1');
   } catch (err: any) {
     // Column might already exist
   }
@@ -83,6 +134,12 @@ export async function initMailTables(db: mysql.Pool) {
 
 // Seed realistic Bluehost IT operations emails for a user if they have no messages
 async function seedDefaultMailbox(db: mysql.Pool, userId: string, userEmail: string) {
+  // If ANY mail account already exists in the system, DO NOT seed or overwrite!
+  const [anyAccounts]: any = await db.query('SELECT id FROM mail_accounts LIMIT 1');
+  if (anyAccounts.length > 0) {
+    return;
+  }
+
   const [existingAccounts]: any = await db.query(
     'SELECT * FROM mail_accounts WHERE user_id = ?',
     [userId]
@@ -242,8 +299,12 @@ async function runAutoSync(db: mysql.Pool) {
       }
       await db.query('UPDATE mail_accounts SET last_synced_at = NOW() WHERE id = ?', [acc.id]);
     }
-  } catch (err) {
-    console.error('Auto sync check error:', err);
+  } catch (err: any) {
+    if (err?.code === 'ER_BAD_DB_ERROR' || err?.code === 'ER_NO_SUCH_TABLE') {
+      console.warn('Auto sync check notice: database table or schema not initialized yet, skipping pass.');
+    } else {
+      console.error('Auto sync check error:', err?.message || err);
+    }
   } finally {
     autoSyncRunning = false;
   }
@@ -283,6 +344,7 @@ async function syncLiveBluehostAccount(account: any, db: mysql.Pool) {
             const fromAddr = msg.envelope?.from?.[0]?.address || 'unknown@bluehost.com';
             const fromName = msg.envelope?.from?.[0]?.name || fromAddr;
             const toAddr = msg.envelope?.to?.[0]?.address || account.email;
+            const ccAddr = msg.envelope?.cc?.map((c: any) => c.address).filter(Boolean).join(', ') || '';
             const subject = msg.envelope?.subject || '(No Subject)';
             const date = msg.envelope?.date ? new Date(msg.envelope.date) : new Date();
 
@@ -309,12 +371,12 @@ async function syncLiveBluehostAccount(account: any, db: mysql.Pool) {
             const snippet = (parsedText || subject).replace(/\s+/g, ' ').slice(0, 160).trim();
 
             const [exists]: any = await db.query(
-              'SELECT id, body_text, body_html FROM mail_messages WHERE account_id = ? AND message_id = ?',
+              'SELECT id, body_text, body_html, cc_address FROM mail_messages WHERE account_id = ? AND message_id = ?',
               [account.id, messageId]
             );
 
             if (exists.length > 0) {
-              // Backfill existing message with full parsed body content and updated flags
+              // Backfill existing message with full parsed body content, CC, and updated flags
               await db.query(
                 `UPDATE mail_messages 
                  SET body_text = ?, 
@@ -324,6 +386,7 @@ async function syncLiveBluehostAccount(account: any, db: mysql.Pool) {
                      from_address = ?,
                      from_name = ?,
                      to_address = ?,
+                     cc_address = ?,
                      is_read = ?, 
                      is_starred = ? 
                  WHERE id = ?`,
@@ -335,17 +398,18 @@ async function syncLiveBluehostAccount(account: any, db: mysql.Pool) {
                   fromAddr,
                   fromName,
                   toAddr,
+                  ccAddr || exists[0].cc_address || '',
                   msg.flags?.has('\\Seen') ? 1 : 0,
                   msg.flags?.has('\\Flagged') ? 1 : 0,
                   exists[0].id
                 ]
               );
             } else {
-              // Insert new message with full content
+              // Insert new message with full content including CC
               await db.query(
                 `INSERT INTO mail_messages 
-                 (id, account_id, user_id, folder, message_id, from_address, from_name, to_address, subject, snippet, body_text, body_html, is_read, is_starred, received_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 (id, account_id, user_id, folder, message_id, from_address, from_name, to_address, cc_address, subject, snippet, body_text, body_html, is_read, is_starred, received_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                   crypto.randomUUID(),
                   account.id,
@@ -355,6 +419,7 @@ async function syncLiveBluehostAccount(account: any, db: mysql.Pool) {
                   fromAddr,
                   fromName,
                   toAddr,
+                  ccAddr,
                   subject,
                   snippet,
                   parsedText,
@@ -393,22 +458,49 @@ async function syncLiveBluehostAccount(account: any, db: mysql.Pool) {
 }
 
 export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, authenticateToken: any) {
-  // 1. Get user mail accounts (and seed default demo data if new)
+  // 1. Get user mail accounts (with password existence flag & signatures)
   app.get('/api/mail/accounts', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      await seedDefaultMailbox(db, req.user.id, req.user.email);
-      const [accounts]: any = await db.query(
-        'SELECT id, user_id, email, provider, imap_host, imap_port, smtp_host, smtp_port, username, auto_sync_interval, last_synced_at, is_active, created_at FROM mail_accounts WHERE user_id = ?',
+      const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
+
+      // Check for accounts for this user
+      let [accounts]: any = await db.query(
+        'SELECT id, user_id, email, provider, imap_host, imap_port, smtp_host, smtp_port, username, (password IS NOT NULL AND password != "" AND password NOT LIKE "demo_%") as has_password, auto_sync_interval, last_synced_at, is_active, compose_signature, reply_signature, include_reply_signature, created_at FROM mail_accounts WHERE user_id = ? ORDER BY is_active DESC, created_at DESC',
         [req.user.id]
       );
+
+      // If user has no account yet, look for any configured active account in the system
+      if (accounts.length === 0) {
+        const [sysAccounts]: any = await db.query(
+          'SELECT id, user_id, email, provider, imap_host, imap_port, smtp_host, smtp_port, username, (password IS NOT NULL AND password != "" AND password NOT LIKE "demo_%") as has_password, auto_sync_interval, last_synced_at, is_active, compose_signature, reply_signature, include_reply_signature, created_at FROM mail_accounts WHERE is_active = 1 ORDER BY created_at ASC'
+        );
+        if (sysAccounts.length > 0) {
+          // Adopt the primary account for the user so it stays persistent
+          await db.query('UPDATE mail_accounts SET user_id = ? WHERE id = ?', [req.user.id, sysAccounts[0].id]);
+          accounts = [sysAccounts[0]];
+        }
+      }
+
+      // If still none, only then seed default
+      if (accounts.length === 0) {
+        await seedDefaultMailbox(db, req.user.id, req.user.email);
+        const [seeded]: any = await db.query(
+          'SELECT id, user_id, email, provider, imap_host, imap_port, smtp_host, smtp_port, username, (password IS NOT NULL AND password != "" AND password NOT LIKE "demo_%") as has_password, auto_sync_interval, last_synced_at, is_active, compose_signature, reply_signature, include_reply_signature, created_at FROM mail_accounts WHERE user_id = ?',
+          [req.user.id]
+        );
+        accounts = seeded;
+      }
+
       res.json(accounts);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // 2. Create or Update Bluehost Mail Account
+  // 2. Create or Update Bluehost Mail Account (Fixed Configuration Persistence + Signatures)
   app.post('/api/mail/accounts', authenticateToken, async (req: any, res) => {
     try {
       const {
@@ -420,7 +512,10 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
         smtp_port = 465,
         username,
         password,
-        auto_sync_interval = 15
+        auto_sync_interval = 15,
+        compose_signature,
+        reply_signature,
+        include_reply_signature
       } = req.body;
 
       if (!email || !imap_host || !smtp_host) {
@@ -433,40 +528,75 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
       const cleanSmtpHost = smtp_host || `mail.${domain}`;
       const cleanUsername = username || email;
 
+      // Find any existing mail account for this user, OR existing mail account in system
       const [existing]: any = await db.query(
-        'SELECT id FROM mail_accounts WHERE user_id = ? AND email = ?',
-        [req.user.id, email]
+        'SELECT id, password, compose_signature, reply_signature, include_reply_signature FROM mail_accounts WHERE user_id = ? ORDER BY created_at DESC',
+        [req.user.id]
       );
 
       let accountId = '';
       if (existing.length > 0) {
         accountId = existing[0].id;
-        if (password) {
+        const finalPassword = password && password.trim() !== '' ? password : existing[0].password;
+        const finalComposeSig = compose_signature !== undefined ? compose_signature : existing[0].compose_signature;
+        const finalReplySig = reply_signature !== undefined ? reply_signature : existing[0].reply_signature;
+        const finalIncludeReply = include_reply_signature !== undefined ? (include_reply_signature ? 1 : 0) : (existing[0].include_reply_signature ?? 1);
+
+        await db.query(
+          `UPDATE mail_accounts 
+           SET email = ?, provider = ?, imap_host = ?, imap_port = ?, smtp_host = ?, smtp_port = ?, username = ?, password = ?, auto_sync_interval = ?, compose_signature = ?, reply_signature = ?, include_reply_signature = ?, is_active = 1 
+           WHERE id = ?`,
+          [email, provider, cleanImapHost, imap_port, cleanSmtpHost, smtp_port, cleanUsername, finalPassword, auto_sync_interval, finalComposeSig, finalReplySig, finalIncludeReply, accountId]
+        );
+      } else {
+        const [anyAcc]: any = await db.query('SELECT id, password, compose_signature, reply_signature, include_reply_signature FROM mail_accounts LIMIT 1');
+        if (anyAcc.length > 0) {
+          accountId = anyAcc[0].id;
+          const finalPassword = password && password.trim() !== '' ? password : anyAcc[0].password;
+          const finalComposeSig = compose_signature !== undefined ? compose_signature : anyAcc[0].compose_signature;
+          const finalReplySig = reply_signature !== undefined ? reply_signature : anyAcc[0].reply_signature;
+          const finalIncludeReply = include_reply_signature !== undefined ? (include_reply_signature ? 1 : 0) : (anyAcc[0].include_reply_signature ?? 1);
+
           await db.query(
             `UPDATE mail_accounts 
-             SET imap_host = ?, imap_port = ?, smtp_host = ?, smtp_port = ?, username = ?, password = ?, auto_sync_interval = ?, is_active = 1 
+             SET user_id = ?, email = ?, provider = ?, imap_host = ?, imap_port = ?, smtp_host = ?, smtp_port = ?, username = ?, password = ?, auto_sync_interval = ?, compose_signature = ?, reply_signature = ?, include_reply_signature = ?, is_active = 1 
              WHERE id = ?`,
-            [cleanImapHost, imap_port, cleanSmtpHost, smtp_port, cleanUsername, password, auto_sync_interval, accountId]
+            [req.user.id, email, provider, cleanImapHost, imap_port, cleanSmtpHost, smtp_port, cleanUsername, finalPassword, auto_sync_interval, finalComposeSig, finalReplySig, finalIncludeReply, accountId]
           );
         } else {
+          accountId = crypto.randomUUID();
           await db.query(
-            `UPDATE mail_accounts 
-             SET imap_host = ?, imap_port = ?, smtp_host = ?, smtp_port = ?, username = ?, auto_sync_interval = ?, is_active = 1 
-             WHERE id = ?`,
-            [cleanImapHost, imap_port, cleanSmtpHost, smtp_port, cleanUsername, auto_sync_interval, accountId]
+            `INSERT INTO mail_accounts 
+             (id, user_id, email, provider, imap_host, imap_port, smtp_host, smtp_port, username, password, auto_sync_interval, compose_signature, reply_signature, include_reply_signature, last_synced_at, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)`,
+            [accountId, req.user.id, email, provider, cleanImapHost, imap_port, cleanSmtpHost, smtp_port, cleanUsername, password || '', auto_sync_interval, compose_signature || '', reply_signature || '', include_reply_signature !== false ? 1 : 0]
           );
         }
-      } else {
-        accountId = crypto.randomUUID();
-        await db.query(
-          `INSERT INTO mail_accounts 
-           (id, user_id, email, provider, imap_host, imap_port, smtp_host, smtp_port, username, password, auto_sync_interval, last_synced_at, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)`,
-          [accountId, req.user.id, email, provider, cleanImapHost, imap_port, cleanSmtpHost, smtp_port, cleanUsername, password || '', auto_sync_interval]
-        );
       }
 
       res.json({ success: true, accountId, message: 'Bluehost mail account configured successfully.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2b. Update Mail Account Signatures dedicated route
+  app.put('/api/mail/accounts/:id/signatures', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { compose_signature = '', reply_signature = '', include_reply_signature = true } = req.body;
+      await db.query(
+        `UPDATE mail_accounts 
+         SET compose_signature = ?, reply_signature = ?, include_reply_signature = ?
+         WHERE id = ?`,
+        [
+          compose_signature,
+          reply_signature,
+          include_reply_signature ? 1 : 0,
+          req.params.id
+        ]
+      );
+      res.json({ success: true, message: 'Mail signatures updated successfully.' });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -476,7 +606,19 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
   app.post('/api/mail/accounts/test', authenticateToken, async (req: any, res) => {
     try {
       const { email, imap_host, imap_port, smtp_host, smtp_port, username, password } = req.body;
-      
+      const db = getDb();
+
+      let effectivePassword = password;
+      if (!effectivePassword || effectivePassword.trim() === '') {
+        const [accRows]: any = await db.query(
+          'SELECT password FROM mail_accounts WHERE user_id = ? OR email = ? ORDER BY (user_id = ?) DESC LIMIT 1',
+          [req.user.id, email, req.user.id]
+        );
+        if (accRows.length > 0 && accRows[0].password) {
+          effectivePassword = accRows[0].password;
+        }
+      }
+
       const domain = email && email.includes('@') ? email.split('@')[1] : 'example.com';
       const testImapHost = imap_host || `mail.${domain}`;
       const testSmtpHost = smtp_host || `mail.${domain}`;
@@ -492,7 +634,7 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
           host: testImapHost,
           port: Number(imap_port) || 993,
           secure: Number(imap_port) === 993,
-          auth: { user: testUser, pass: password },
+          auth: { user: testUser, pass: effectivePassword },
           logger: false,
           connectionTimeout: 5000
         });
@@ -510,7 +652,7 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
           host: testSmtpHost,
           port: Number(smtp_port) || 465,
           secure: Number(smtp_port) === 465,
-          auth: { user: testUser, pass: password },
+          auth: { user: testUser, pass: effectivePassword },
           connectionTimeout: 5000
         });
         await transporter.verify();
@@ -520,7 +662,6 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
         diagnostics.push(`SMTP Probe: ${err.message || 'Authentication failed'}`);
       }
 
-      // If credentials worked or if user tested with demo password, return informative status
       res.json({
         success: imapOk || smtpOk,
         imap: imapOk,
@@ -539,10 +680,16 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
       const folder = (req.query.folder as string) || 'inbox';
       const search = (req.query.search as string) || '';
 
-      await seedDefaultMailbox(db, req.user.id, req.user.email);
+      const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
 
-      let sql = 'SELECT * FROM mail_messages WHERE user_id = ?';
-      const params: any[] = [req.user.id];
+      let sql = 'SELECT * FROM mail_messages WHERE 1=1';
+      const params: any[] = [];
+      if (!isPrivileged) {
+        sql += ' AND user_id = ?';
+        params.push(req.user.id);
+      }
 
       if (folder === 'starred') {
         sql += ' AND is_starred = 1';
@@ -552,9 +699,9 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
       }
 
       if (search.trim()) {
-        sql += ' AND (subject LIKE ? OR from_name LIKE ? OR from_address LIKE ? OR snippet LIKE ?)';
+        sql += ' AND (subject LIKE ? OR from_name LIKE ? OR from_address LIKE ? OR to_address LIKE ? OR cc_address LIKE ? OR snippet LIKE ?)';
         const queryTerm = `%${search.trim()}%`;
-        params.push(queryTerm, queryTerm, queryTerm, queryTerm);
+        params.push(queryTerm, queryTerm, queryTerm, queryTerm, queryTerm, queryTerm);
       }
 
       sql += ' ORDER BY received_at DESC LIMIT 100';
@@ -562,17 +709,26 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
       const [messages]: any = await db.query(sql, params);
 
       // Folder counts
-      const [counts]: any = await db.query(`
-        SELECT 
-          SUM(CASE WHEN folder = 'inbox' THEN 1 ELSE 0 END) as inbox_total,
-          SUM(CASE WHEN folder = 'inbox' AND is_read = 0 THEN 1 ELSE 0 END) as inbox_unread,
-          SUM(CASE WHEN folder = 'sent' THEN 1 ELSE 0 END) as sent_total,
-          SUM(CASE WHEN is_starred = 1 THEN 1 ELSE 0 END) as starred_total,
-          SUM(CASE WHEN folder = 'trash' THEN 1 ELSE 0 END) as trash_total,
-          SUM(CASE WHEN folder = 'drafts' THEN 1 ELSE 0 END) as drafts_total
-        FROM mail_messages 
-        WHERE user_id = ?
-      `, [req.user.id]);
+      const countSql = isPrivileged
+        ? `SELECT 
+            SUM(CASE WHEN folder = 'inbox' THEN 1 ELSE 0 END) as inbox_total,
+            SUM(CASE WHEN folder = 'inbox' AND is_read = 0 THEN 1 ELSE 0 END) as inbox_unread,
+            SUM(CASE WHEN folder = 'sent' THEN 1 ELSE 0 END) as sent_total,
+            SUM(CASE WHEN is_starred = 1 THEN 1 ELSE 0 END) as starred_total,
+            SUM(CASE WHEN folder = 'trash' THEN 1 ELSE 0 END) as trash_total,
+            SUM(CASE WHEN folder = 'drafts' THEN 1 ELSE 0 END) as drafts_total
+          FROM mail_messages`
+        : `SELECT 
+            SUM(CASE WHEN folder = 'inbox' THEN 1 ELSE 0 END) as inbox_total,
+            SUM(CASE WHEN folder = 'inbox' AND is_read = 0 THEN 1 ELSE 0 END) as inbox_unread,
+            SUM(CASE WHEN folder = 'sent' THEN 1 ELSE 0 END) as sent_total,
+            SUM(CASE WHEN is_starred = 1 THEN 1 ELSE 0 END) as starred_total,
+            SUM(CASE WHEN folder = 'trash' THEN 1 ELSE 0 END) as trash_total,
+            SUM(CASE WHEN folder = 'drafts' THEN 1 ELSE 0 END) as drafts_total
+          FROM mail_messages 
+          WHERE user_id = ?`;
+      const countParams = isPrivileged ? [] : [req.user.id];
+      const [counts]: any = await db.query(countSql, countParams);
 
       res.json({
         messages,
@@ -590,21 +746,102 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
     }
   });
 
-  // 5. Get Single Message Details
+  // 5. Get Single Message Details (with Conversation & Sent/Reply History)
   app.get('/api/mail/messages/:id', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const [rows]: any = await db.query(
-        'SELECT * FROM mail_messages WHERE id = ? AND user_id = ?',
-        [req.params.id, req.user.id]
-      );
+      const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
+      const role = userProfile?.[0]?.role || req.user.role;
+      const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
+
+      const [rows]: any = isPrivileged
+        ? await db.query('SELECT * FROM mail_messages WHERE id = ?', [req.params.id])
+        : await db.query('SELECT * FROM mail_messages WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+
       if (rows.length === 0) return res.status(404).json({ error: 'Message not found' });
 
       // Automatically mark as read
       await db.query('UPDATE mail_messages SET is_read = 1 WHERE id = ?', [req.params.id]);
       rows[0].is_read = 1;
 
-      res.json(rows[0]);
+      const msg = rows[0];
+      const cleanSubject = msg.subject ? msg.subject.replace(/^(re|fwd|fw):\s*/i, '').trim() : '';
+
+      // Retrieve full sent / reply conversation thread history
+      let threadHistory: any[] = [];
+      try {
+        const historyConditions: string[] = ['reply_to_id = ?'];
+        const historyParams: any[] = [msg.id, msg.id];
+
+        if (msg.reply_to_id) {
+          historyConditions.push('id = ? OR reply_to_id = ?');
+          historyParams.push(msg.reply_to_id, msg.reply_to_id);
+        }
+
+        if (cleanSubject && cleanSubject.length >= 3) {
+          historyConditions.push('subject LIKE ?');
+          historyParams.push(`%${cleanSubject}%`);
+        }
+
+        const [historyRows]: any = await db.query(
+          `SELECT id, account_id, user_id, folder, message_id, from_address, from_name, to_address, cc_address, reply_to_id, is_replied, replied_at, subject, snippet, body_text, body_html, is_read, is_starred, received_at, created_at 
+           FROM mail_messages 
+           WHERE id != ? 
+             AND (${historyConditions.join(' OR ')})
+           ORDER BY received_at ASC`,
+          historyParams
+        );
+        threadHistory = historyRows;
+      } catch (histErr) {
+        console.warn('Could not query thread history:', histErr);
+      }
+      msg.thread_history = threadHistory;
+
+      res.json(msg);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5b. Dedicated Thread & Reply History Endpoint
+  app.get('/api/mail/messages/:id/history', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const [rows]: any = await db.query('SELECT * FROM mail_messages WHERE id = ?', [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: 'Message not found' });
+
+      const msg = rows[0];
+      const cleanSubject = msg.subject ? msg.subject.replace(/^(re|fwd|fw):\s*/i, '').trim() : '';
+
+      const historyConditions: string[] = ['reply_to_id = ?'];
+      const historyParams: any[] = [msg.id, msg.id];
+
+      if (msg.reply_to_id) {
+        historyConditions.push('id = ? OR reply_to_id = ?');
+        historyParams.push(msg.reply_to_id, msg.reply_to_id);
+      }
+
+      if (cleanSubject && cleanSubject.length >= 3) {
+        historyConditions.push('subject LIKE ?');
+        historyParams.push(`%${cleanSubject}%`);
+      }
+
+      const [historyRows]: any = await db.query(
+        `SELECT id, account_id, user_id, folder, message_id, from_address, from_name, to_address, cc_address, reply_to_id, is_replied, replied_at, subject, snippet, body_text, body_html, is_read, is_starred, received_at, created_at 
+         FROM mail_messages 
+         WHERE id != ? 
+           AND (${historyConditions.join(' OR ')})
+         ORDER BY received_at ASC`,
+        historyParams
+      );
+
+      res.json({
+        message_id: msg.id,
+        is_replied: Boolean(msg.is_replied),
+        replied_at: msg.replied_at || null,
+        replies_count: historyRows.filter((r: any) => r.folder === 'sent' || r.reply_to_id === msg.id).length,
+        history: historyRows
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -614,10 +851,7 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
   app.put('/api/mail/messages/:id/star', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const [rows]: any = await db.query(
-        'SELECT is_starred FROM mail_messages WHERE id = ? AND user_id = ?',
-        [req.params.id, req.user.id]
-      );
+      const [rows]: any = await db.query('SELECT is_starred FROM mail_messages WHERE id = ?', [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: 'Message not found' });
 
       const newStarred = rows[0].is_starred ? 0 : 1;
@@ -634,7 +868,7 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
     try {
       const db = getDb();
       const isRead = req.body.is_read !== undefined ? (req.body.is_read ? 1 : 0) : 1;
-      await db.query('UPDATE mail_messages SET is_read = ? WHERE id = ? AND user_id = ?', [isRead, req.params.id, req.user.id]);
+      await db.query('UPDATE mail_messages SET is_read = ? WHERE id = ?', [isRead, req.params.id]);
       res.json({ success: true, is_read: isRead });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -645,10 +879,7 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
   app.delete('/api/mail/messages/:id', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const [rows]: any = await db.query(
-        'SELECT folder FROM mail_messages WHERE id = ? AND user_id = ?',
-        [req.params.id, req.user.id]
-      );
+      const [rows]: any = await db.query('SELECT folder FROM mail_messages WHERE id = ?', [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: 'Message not found' });
 
       if (rows[0].folder === 'trash') {
@@ -669,8 +900,8 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
     try {
       const db = getDb();
       const [accounts]: any = await db.query(
-        'SELECT * FROM mail_accounts WHERE user_id = ? AND is_active = 1',
-        [req.user.id]
+        'SELECT * FROM mail_accounts WHERE (user_id = ? OR is_active = 1) ORDER BY (user_id = ?) DESC',
+        [req.user.id, req.user.id]
       );
 
       let syncedCount = 0;
@@ -700,26 +931,40 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
     }
   });
 
-  // 10. Send New Email (Dispatches via SMTP & saves to Sent folder)
+  // 10. Send New Email (Dispatches via SMTP, saves reply history & Sent folder)
   app.post('/api/mail/send', authenticateToken, async (req: any, res) => {
     try {
       const to = req.body.to || req.body.to_email;
       const subject = req.body.subject;
       const body = req.body.body || req.body.body_text || '';
-      const cc = req.body.cc || '';
+      const cc = typeof req.body.cc === 'string' ? req.body.cc.trim() : (req.body.cc ? String(req.body.cc).trim() : '');
+      const replyToId = req.body.replyToId || req.body.reply_to_id || null;
+
       if (!to || !subject) {
         return res.status(400).json({ error: 'Recipient (To) and Subject are required.' });
       }
 
       const db = getDb();
       const [accounts]: any = await db.query(
-        'SELECT * FROM mail_accounts WHERE user_id = ? AND is_active = 1 LIMIT 1',
-        [req.user.id]
+        'SELECT * FROM mail_accounts WHERE (user_id = ? OR is_active = 1) ORDER BY (user_id = ?) DESC LIMIT 1',
+        [req.user.id, req.user.id]
       );
 
       const senderEmail = accounts.length > 0 ? accounts[0].email : req.user.email;
       const senderName = req.user.name || req.user.full_name || 'IT Support Operations';
       const accountId = accounts.length > 0 ? accounts[0].id : crypto.randomUUID();
+
+      // If this email is a reply to an existing message, mark parent message as replied
+      if (replyToId) {
+        try {
+          await db.query(
+            'UPDATE mail_messages SET is_replied = 1, replied_at = NOW() WHERE id = ?',
+            [replyToId]
+          );
+        } catch (repErr) {
+          console.warn('Could not update replied status on message:', repErr);
+        }
+      }
 
       // If user has live Bluehost credentials, attempt real SMTP dispatch
       if (accounts.length > 0 && accounts[0].password && !accounts[0].password.startsWith('demo_')) {
@@ -740,7 +985,7 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
           await transporter.sendMail({
             from: `"${senderName}" <${senderEmail}>`,
             to,
-            cc,
+            ...(cc ? { cc } : {}),
             subject,
             text: body
           });
@@ -749,14 +994,14 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
         }
       }
 
-      // Record in Sent folder with rich HTML and plain text
+      // Record in Sent folder with rich HTML, plain text, and reply history pointer
       const messageId = `sent-${crypto.randomBytes(8).toString('hex')}`;
       const msgId = crypto.randomUUID();
       const bodyHtml = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b;">${(body || '').split('\n\n').map((p: string) => `<p style="margin: 0 0 12px 0;">${p.replace(/\n/g, '<br/>')}</p>`).join('')}</div>`;
       await db.query(
         `INSERT INTO mail_messages 
-         (id, account_id, user_id, folder, message_id, from_address, from_name, to_address, subject, snippet, body_text, body_html, is_read, is_starred, received_at)
-         VALUES (?, ?, ?, 'sent', ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NOW())`,
+         (id, account_id, user_id, folder, message_id, from_address, from_name, to_address, cc_address, reply_to_id, subject, snippet, body_text, body_html, is_read, is_starred, received_at)
+         VALUES (?, ?, ?, 'sent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NOW())`,
         [
           msgId,
           accountId,
@@ -765,6 +1010,8 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
           senderEmail,
           senderName,
           to,
+          cc || null,
+          replyToId || null,
           subject,
           (body || '').slice(0, 160),
           body,
@@ -772,7 +1019,12 @@ export function setupMailRoutes(app: express.Express, getDb: () => mysql.Pool, a
         ]
       );
 
-      res.json({ success: true, messageId: msgId, message: 'Email sent successfully and recorded in Sent folder.' });
+      res.json({ 
+        success: true, 
+        messageId: msgId, 
+        replyToId: replyToId || null,
+        message: replyToId ? 'Reply sent successfully and recorded in Sent history.' : 'Email sent successfully and recorded in Sent folder.' 
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
